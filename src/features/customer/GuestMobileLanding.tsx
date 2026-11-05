@@ -19,7 +19,7 @@ type Props = {
 };
 
 export function GuestMobileLanding({ scrollToMenuOnMount = false, trackScroll = true }: Props) {
-  useTitle('After Dunes');
+  useTitle('Gymkhana');
   const cart = useCart();
   const [navTone, setNavTone] = useState<'hero' | 'surface'>('hero');
 
@@ -104,7 +104,7 @@ export function GuestMobileLanding({ scrollToMenuOnMount = false, trackScroll = 
             <div className="ad-hero-copy">
               <p className="ad-hero-kicker">It&apos;s time for</p>
               <h1 className="ad-hero-title">
-                <span className="ad-hero-title-row">After Dunes</span>
+                <span className="ad-hero-title-row">Gymkhana</span>
                 <span className="ad-hero-title-line">Coffee Experience</span>
               </h1>
             </div>

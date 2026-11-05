@@ -53,14 +53,14 @@ export function OdooFoHLayout() {
     <div className="odoo-pos o-foh">
       <header className="o-foh-nav">
         <div className="o-foh-tabs">
-          <NavLink to="/pos/app/tables" className={({ isActive }) => `o-foh-tab${isActive ? ' is-active' : ''}`}>
-            Tables
+          <NavLink to="/pos/backend/facilities" className={({ isActive }) => `o-foh-tab${isActive ? ' is-active' : ''}`}>
+            Facilities
           </NavLink>
           <NavLink to="/pos/app/register" className={({ isActive }) => `o-foh-tab${isActive ? ' is-active' : ''}`}>
-            Register
+            POS
           </NavLink>
-          <NavLink to="/pos/app/orders" className={({ isActive }) => `o-foh-tab${isActive ? ' is-active' : ''}`}>
-            Orders
+          <NavLink to="/pos/backend/bookings" className={({ isActive }) => `o-foh-tab${isActive ? ' is-active' : ''}`}>
+            Bookings
           </NavLink>
         </div>
         {pill ? <span className="o-foh-pill">{pill}</span> : null}
@@ -68,7 +68,7 @@ export function OdooFoHLayout() {
           <label className="o-search">
             <SearchIcon />
             <input
-              placeholder="Search products..."
+              placeholder="Search services..."
               value={productQuery}
               onChange={(e) => {
                 const value = e.target.value;

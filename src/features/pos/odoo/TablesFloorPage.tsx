@@ -33,7 +33,7 @@ function HashIcon() {
 }
 
 export function TablesFloorPage() {
-  useTitle('Tables');
+  useTitle('Facilities');
   const navigate = useNavigate();
   const { tables, ready } = usePos();
   const [floors, setFloors] = useState<FloorPlan[]>([]);

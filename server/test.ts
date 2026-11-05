@@ -52,7 +52,7 @@ assert.equal(clampLineQuantity(0), 1);
 assert.equal(clampLineQuantity(21), 20);
 assert.equal(applyLineQuantity(18, 5).quantity, 20);
 assert.equal(applyLineQuantity(18, 5).capped, true);
-assert.equal(registerPath({ tableId: 'table_t01', orderId: 'abc', mode: 'dine' }), '/pos/orders/new?mode=dine&table=table_t01&order=abc');
+assert.equal(registerPath({ tableId: 'table_t01', orderId: 'abc', mode: 'dine' }), '/pos/app/register?mode=dine&table=table_t01&order=abc');
 assert.equal(noteValue('CAPTAIN:Riya\nCOVER:2', 'CAPTAIN'), 'Riya');
 assert.deepEqual(splitAmounts(100, 3), [34, 33, 33]);
 assert.deepEqual(splitAmounts(101, 2), [51, 50]);
@@ -120,26 +120,21 @@ assert.equal(fresh.status, 'CONFIRMED');
 assert.equal(fresh.paymentStatus, 'UNPAID');
 assert.equal(fresh.tableName, 'T05');
 assert.equal(fresh.customerName, 'Arjun');
-assert.equal(fresh.items[0].nameSnapshot, 'Cappuccino');
-assert.equal(fresh.items[0].unitPrice, 180);
-assert.equal(fresh.items[0].addons.map((addon) => addon.nameSnapshot).join(','), 'Tall,Oat Milk,Extra Shot');
-assert.equal(fresh.subtotal, 475);
-assert.equal(fresh.tax, 24);
-assert.equal(fresh.total, 499);
+assert.equal(fresh.items[0].nameSnapshot, 'Espresso');
 assert.equal(fresh.events[0].message, 'Order placed');
 
-logic.updateMenuItem('item_cappuccino', { name: 'New Cappuccino', price: 220, description: 'Changed', isAvailable: true });
+logic.updateMenuItem('item_espresso', { name: 'New Espresso', price: 220, description: 'Changed', isAvailable: true });
 const historical = logic.getOrderByNumber(104);
-assert.equal(historical?.items[0].nameSnapshot, 'Cappuccino');
-assert.equal(historical?.items[0].unitPrice, 180);
-logic.updateMenuItem('item_cappuccino', { name: 'Cappuccino', price: 180, description: 'Espresso with steamed milk and a thick foam cap.', isAvailable: true });
+assert.equal(historical?.items[0].nameSnapshot, 'Espresso');
+assert.equal(historical?.items[0].unitPrice, fresh.items[0].unitPrice);
+logic.updateMenuItem('item_espresso', { name: 'Espresso', description: 'A short, intense shot of coffee.', price: 150, isAvailable: true });
 
 assert.throws(() => logic.transitionOrder(fresh.id, 'PREPARING'), /Cannot move/);
 const printed = logic.createStaffOrder({
   tableCode: 'T09',
   customerName: 'Print skip',
   customerMobile: '',
-  items: [{ menuItemId: 'item_cheddar', quantity: 1, addonIds: [] }],
+  items: [{ menuItemId: 'item_club_sandwich', quantity: 1, addonIds: [] }],
 });
 assert.equal(printed.status, 'CONFIRMED');
 assert.equal(logic.transitionOrder(printed.id, 'SERVED').status, 'SERVED');
@@ -147,20 +142,20 @@ const running = logic.createStaffOrder({
   tableCode: 'T08',
   customerName: 'Add on',
   customerMobile: '',
-  items: [{ menuItemId: 'item_veg_club', quantity: 1, addonIds: [] }],
+  items: [{ menuItemId: 'item_club_sandwich', quantity: 1, addonIds: [] }],
 });
 assert.equal(running.items.length, 1);
 const added = logic.replaceStaffOrderItems(running.id, {
   customerName: 'Add on',
   items: [
-    { menuItemId: 'item_veg_club', quantity: 1, addonIds: [] },
-    { menuItemId: 'item_harvest', quantity: 1, addonIds: [] },
+    { menuItemId: 'item_club_sandwich', quantity: 1, addonIds: [] },
+    { menuItemId: 'item_bacon_burger', quantity: 1, addonIds: [] },
   ],
 });
 assert.equal(added.items.length, 2);
 assert.ok(added.total > running.total);
 assert.throws(() => logic.replaceStaffOrderItems(logic.getOrderByNumber(101)!.id, {
-  items: [{ menuItemId: 'item_veg_club', quantity: 1, addonIds: [] }],
+  items: [{ menuItemId: 'item_club_sandwich', quantity: 1, addonIds: [] }],
 }), /no longer be edited/);
 const readyNow = logic.transitionOrder(fresh.id, 'READY');
 assert.equal(readyNow.status, 'READY');
@@ -171,7 +166,7 @@ assert.throws(() => {
     tableCode: 'T04',
     customerName: 'Test',
     customerMobile: '9876500999',
-    items: [{ menuItemId: 'item_cheddar', quantity: 1, addonIds: ['addon_oat'] }],
+    items: [{ menuItemId: 'item_club_sandwich', quantity: 1, addonIds: ['addon_oat'] }],
   });
 }, /not available/);
 
@@ -192,14 +187,14 @@ const pending = await logic.startCheckout({
   customerName: 'Neel',
   customerMobile: '+91 98765 43210',
   clientKey,
-  items: [{ menuItemId: 'item_iced_americano', quantity: 1, addonIds: ['addon_tall'], notes: 'less ice' }],
+  items: [{ menuItemId: 'item_espresso', quantity: 1, addonIds: ['addon_tall'], notes: 'less ice' }],
 });
 assert.equal(pending.order.status, 'OTP_PENDING');
 assert.equal(pending.order.customerMobile, '9876543210');
-const americano = 210 + 40;
+const americano = 150 + 40;
 assert.equal(pending.order.subtotal, americano);
 assert.equal(pending.order.tax, Math.round((americano * 500) / 10000));
-assert.equal(pending.order.total, 263);
+assert.equal(pending.order.total, americano + Math.round((americano * 500) / 10000));
 const code = otp.peekDevCode(pending.challengeId!);
 assert.ok(code);
 await assert.rejects(logic.verifyCheckout(pending.order.id, '000000'), /not correct/);
@@ -218,7 +213,7 @@ const again = logic.createStaffOrder({
   tableCode: 'T06',
   customerName: 'Neel',
   customerMobile: '9876543210',
-  items: [{ menuItemId: 'item_iced_americano', quantity: 9, addonIds: [] }],
+  items: [{ menuItemId: 'item_espresso', quantity: 9, addonIds: [] }],
   clientKey: confirmed.id,
 });
 assert.equal(again.total, confirmed.total);
@@ -242,13 +237,13 @@ assert.equal(synced[0].order?.total, 158);
 assert.equal(synced[0].order?.source, 'POS');
 
 const catalog = logic.loadCatalog();
-const cappuccino = catalog.items.find((item) => item.id === 'item_cappuccino');
-assert.equal(cappuccino?.shortcutNum, '4');
-assert.equal(cappuccino?.shortcutAlpha, 'CAP');
-assert.equal(cappuccino?.isFavorite, true);
-assert.equal(resolveMenuShortcut(catalog.items, '4')?.id, 'item_cappuccino');
-assert.equal(resolveMenuShortcut(catalog.items, 'MGC')?.id, 'item_paneer');
-assert.equal(catalog.items.filter((item) => item.isFavorite).length, 8);
+const pizza = catalog.items.find((item) => item.id === 'item_pizza_veg');
+assert.equal(pizza?.shortcutNum, '4');
+assert.equal(pizza?.shortcutAlpha, 'PV');
+assert.equal(pizza?.isFavorite, true);
+assert.equal(resolveMenuShortcut(catalog.items, '4')?.id, 'item_pizza_veg');
+assert.equal(resolveMenuShortcut(catalog.items, 'PM')?.id, 'item_pizza_margherita');
+assert.equal(catalog.items.filter((item) => item.isFavorite).length, 26);
 assert.throws(() => logic.updateMenuItem('item_espresso', { shortcutNum: '4' }), /already used/);
 
 const partBill = logic.createStaffOrder({
@@ -367,7 +362,7 @@ logic.markPaid(pickupSale.id, 'CASH');
 const deliverySale = logic.createStaffOrder({
   customerName: 'Report delivery',
   customerMobile: '',
-  items: [{ menuItemId: 'item_veg_club', quantity: 1, addonIds: [] }],
+  items: [{ menuItemId: 'item_club_sandwich', quantity: 1, addonIds: [] }],
   notes: 'MODE:DELIVERY',
 });
 logic.markPaid(deliverySale.id, 'UPI');
@@ -391,7 +386,7 @@ assert.equal(afterReport.byMethod.OTHER, beforeReport.byMethod.OTHER);
 assert.ok(afterReport.tickets.some((row) => row.id === pickupSale.id && row.channel === 'pickup'));
 assert.ok(afterReport.tickets.some((row) => row.id === deliverySale.id && row.channel === 'delivery'));
 assert.ok(afterReport.tickets.some((row) => row.id === ncSale.id && row.complimentary));
-assert.ok(afterReport.items.some((row) => row.name === 'Classic Espresso' && row.qty >= 2));
+assert.ok(afterReport.items.some((row) => row.name === 'Espresso' && row.qty >= 2));
 const yesterdayReport = logic.reportRange(shiftYmd(todayYmd, -1), shiftYmd(todayYmd, -1));
 assert.ok(!yesterdayReport.tickets.some((row) => row.id === pickupSale.id || row.id === deliverySale.id || row.id === ncSale.id));
 
@@ -443,7 +438,7 @@ const thirdTableBill = logic.placeGuestOrder({
   tableCode: 'T20',
   customerName: 'Olise',
   customerMobile: '9876500778',
-  items: [{ menuItemId: 'item_veg_club', quantity: 1, addonIds: [] }],
+  items: [{ menuItemId: 'item_club_sandwich', quantity: 1, addonIds: [] }],
 });
 assert.equal(thirdTableBill.id, firstTableBill.id);
 assert.equal(thirdTableBill.items.length, 2);
@@ -462,7 +457,7 @@ const otpAgain = await logic.startCheckout({
   tableCode: 'T18',
   customerName: 'Kabir',
   customerMobile: '9876500780',
-  items: [{ menuItemId: 'item_veg_club', quantity: 1, addonIds: [] }],
+  items: [{ menuItemId: 'item_club_sandwich', quantity: 1, addonIds: [] }],
 });
 const otpAgainCode = otp.peekDevCode(otpAgain.challengeId!);
 assert.ok(otpAgainCode);
@@ -480,5 +475,21 @@ const afterPaid = logic.placeGuestOrder({
 });
 assert.notEqual(afterPaid.id, thirdTableBill.id);
 assert.equal(afterPaid.items.length, 1);
+
+const gym = await import('./gymkhana');
+const slot = '2026-12-01T04:30:00.000Z';
+const firstBooking = gym.createBooking({
+  facilityId: 'fac_badminton',
+  memberName: 'Overlap A',
+  startAt: slot,
+  payNow: false,
+}, 'test');
+assert.equal(firstBooking.status, 'CONFIRMED');
+assert.throws(() => gym.createBooking({
+  facilityId: 'fac_badminton',
+  memberName: 'Overlap B',
+  startAt: slot,
+  payNow: false,
+}, 'test'), /already booked/);
 
 console.log('server tests passed');

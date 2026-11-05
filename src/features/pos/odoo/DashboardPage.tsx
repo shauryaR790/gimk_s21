@@ -119,18 +119,32 @@ function SessionSparkline({
 }
 
 export function DashboardPage() {
-  useTitle('Point of Sale');
+  useTitle('Sports Centre Overview');
   const navigate = useNavigate();
   const { user } = usePos();
   const [data, setData] = useState<Dash | null>(null);
   const [openingFor, setOpeningFor] = useState<string | null>(null);
   const [leaving, setLeaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [gym, setGym] = useState<{
+    totalMembers: number;
+    activeMemberships: number;
+    todaysBookings: number;
+    todaysRevenue: number;
+    currentOccupancy: number;
+    capacity: number;
+    pendingPayments: number;
+  } | null>(null);
   const initial = (user?.name ?? 'S').trim().charAt(0).toUpperCase() || 'S';
 
   const load = useCallback(async () => {
     const dash = await api<Dash>('/api/pos/dashboard');
     setData(dash);
+    try {
+      setGym(await api('/api/gym/overview'));
+    } catch {
+      setGym(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -143,7 +157,7 @@ export function DashboardPage() {
 
   function goFoH(fromId: string) {
     setLeaving(fromId);
-    window.setTimeout(() => navigate('/pos/app/tables'), 220);
+    window.setTimeout(() => navigate('/pos/app/register'), 220);
   }
 
   async function openRegister(openingCash: number) {
@@ -155,7 +169,7 @@ export function DashboardPage() {
     });
     setOpeningFor(null);
     setLeaving(configId);
-    window.setTimeout(() => navigate('/pos/app/tables', { replace: true }), 220);
+    window.setTimeout(() => navigate('/pos/app/register', { replace: true }), 220);
   }
 
   if (error) return <p className="o-dash-error">{error}</p>;
@@ -205,7 +219,7 @@ export function DashboardPage() {
                       className="o-btn o-btn--primary o-btn--pos"
                       onClick={() => goFoH(card.config.id)}
                     >
-                      Continue Selling
+                      Continue POS
                     </button>
                     <button
                       type="button"
@@ -239,16 +253,16 @@ export function DashboardPage() {
                   <strong>{formatOdooINR(card.stats.openingCash)}</strong>
                 </div>
                 <div className="o-pos-card__stat">
-                  <span>Sold</span>
+                  <span>Today&apos;s revenue</span>
                   <strong>
-                    {formatOdooINR(card.stats.soldTotal)} ({card.stats.soldOrders} order
+                    {formatOdooINR(card.stats.soldTotal)} ({card.stats.soldOrders} sale
                     {card.stats.soldOrders === 1 ? '' : 's'})
                   </strong>
                 </div>
                 <div className="o-pos-card__stat">
-                  <span>Ongoing</span>
+                  <span>Open sales</span>
                   <strong>
-                    {formatOdooINR(card.stats.ongoingTotal)} ({card.stats.ongoingOrders} order
+                    {formatOdooINR(card.stats.ongoingTotal)} ({card.stats.ongoingOrders} open
                     {card.stats.ongoingOrders === 1 ? '' : 's'})
                   </strong>
                 </div>
@@ -274,6 +288,17 @@ export function DashboardPage() {
           </button>
         ) : null}
       </div>
+
+      {gym ? (
+        <section className="o-track__kpis o-track__kpis--four" style={{ margin: 16 }}>
+          <article><span>Total members</span><strong>{gym.totalMembers}</strong></article>
+          <article><span>Active memberships</span><strong>{gym.activeMemberships}</strong></article>
+          <article><span>Today&apos;s bookings</span><strong>{gym.todaysBookings}</strong></article>
+          <article><span>Booking revenue</span><strong>{formatOdooINR(gym.todaysRevenue)}</strong></article>
+          <article><span>Current occupancy</span><strong>{gym.currentOccupancy}/{gym.capacity}</strong></article>
+          <article><span>Pending payments</span><strong>{formatOdooINR(gym.pendingPayments)}</strong></article>
+        </section>
+      ) : null}
 
       {openingFor ? (
         <OpeningCashModal onDiscard={() => setOpeningFor(null)} onOpen={openRegister} />

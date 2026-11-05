@@ -6,11 +6,30 @@ import { downloadExcel } from '../../../lib/excel';
 import { useTitle } from '../../../lib/useTitle';
 import { usePos } from '../PosContext';
 import type { BackendChromeContext } from './OdooBackendLayout';
+import { Dropdown } from '../gym/record';
 
 type Range = 'today' | '7' | '30';
 type Focus = 'all' | 'open' | 'paid' | 'due' | 'cancelled';
 
 const COLORS = ['#3949ab', '#5c6bc0', '#26a69a', '#ef6c00', '#c62828', '#6d4c41', '#00838f', '#7b1fa2'];
+const CLUB_CATEGORIES = new Set([
+  'cat_facility',
+  'cat_membership',
+  'cat_classes',
+  'cat_coaching',
+  'cat_rentals',
+  'cat_merch',
+  'cat_other_services',
+  'cat_refreshments',
+]);
+
+function isClubSale(ticket: SalesTicket, names: Set<string>) {
+  return names.size > 0 && ticket.items.length > 0 && ticket.items.every((item) => names.has(item.name));
+}
+
+function countedSale(ticket: SalesTicket) {
+  return !ticket.cancelled && !ticket.complimentary;
+}
 
 function ymd(date: Date) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
@@ -50,14 +69,28 @@ function changeLabel(current: number, previous: number) {
 }
 
 export function ReportingPage() {
-  useTitle('Reporting');
+  useTitle('Dashboard');
   const pos = usePos();
   const { search, setPagerLabel } = useOutletContext<BackendChromeContext>();
   const [range, setRange] = useState<Range>('today');
   const [focus, setFocus] = useState<Focus>('all');
   const [report, setReport] = useState<SalesReport | null>(null);
-  const [previousNet, setPreviousNet] = useState(0);
+  const [previousTickets, setPreviousTickets] = useState<SalesTicket[]>([]);
   const [error, setError] = useState('');
+  const [gym, setGym] = useState<{
+    facilityRevenue: number;
+    membershipRevenue: number;
+    coachingRevenue: number;
+    retail: number;
+    attendance: number;
+    cancellations: number;
+    noShows: number;
+    renewals: number;
+    utilization: { name: string; bookings: number }[];
+    activeVisitors: number;
+    activeMemberships: number;
+    visitors: number;
+  } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -67,11 +100,13 @@ export function ReportingPage() {
     void Promise.all([
       api<SalesReport>(`/api/reports?from=${current.from}&to=${current.to}`),
       api<SalesReport>(`/api/reports?from=${previous.from}&to=${previous.to}`),
+      api<NonNullable<typeof gym>>('/api/gym/reports'),
     ])
-      .then(([now, before]) => {
+      .then(([now, before, centre]) => {
         if (!live) return;
         setReport(now);
-        setPreviousNet(before.net);
+        setPreviousTickets(before.tickets);
+        setGym(centre);
       })
       .catch((err: unknown) => {
         if (live) setError(err instanceof Error ? err.message : 'Could not load the report');
@@ -96,37 +131,53 @@ export function ReportingPage() {
     return () => window.removeEventListener('habsos-report-action', onAction);
   });
 
+  const clubNames = useMemo(
+    () => new Set(pos.items.filter((item) => CLUB_CATEGORIES.has(item.categoryId)).map((item) => item.name)),
+    [pos.items],
+  );
+  const clubTickets = useMemo(
+    () => (report?.tickets ?? []).filter((ticket) => isClubSale(ticket, clubNames)),
+    [report, clubNames],
+  );
+  const clubNet = useMemo(
+    () => clubTickets.filter(countedSale).reduce((sum, ticket) => sum + ticket.total, 0),
+    [clubTickets],
+  );
+  const previousNet = useMemo(
+    () => previousTickets.filter((ticket) => isClubSale(ticket, clubNames) && countedSale(ticket)).reduce((sum, ticket) => sum + ticket.total, 0),
+    [previousTickets, clubNames],
+  );
   const bars = useMemo(() => {
     const weights = [18, 32, 14, 46, 27, 58, 22, 71, 39, 84, 31, 96, 44, 112, 26, 77, 128, 53, 91, 36, 68, 21, 88, 49, 104, 63];
     const weightSum = weights.reduce((sum, weight) => sum + weight, 0);
-    const net = report?.net ?? 0;
     return weights.map((weight, index) => ({
       key: String(index),
       label: String(index),
-      amount: net > 0 ? Math.max(1, Math.round((net * weight) / weightSum)) : weight,
+      amount: clubNet > 0 ? Math.max(1, Math.round((clubNet * weight) / weightSum)) : weight,
     }));
-  }, [report]);
+  }, [clubNet]);
 
   const slices = useMemo(() => {
-    return (report?.categories ?? []).filter((row) => row.amount > 0).slice(0, 8).map((row, index) => ({
+    const sports = new Set(['Facility Bookings', 'Memberships', 'Classes', 'Coaching', 'Equipment Rentals', 'Merchandise', 'Other Services']);
+    return (report?.categories ?? []).filter((row) => row.amount > 0 && sports.has(row.name)).slice(0, 8).map((row, index) => ({
       ...row,
       color: COLORS[index % COLORS.length],
     }));
   }, [report]);
 
   const counts = useMemo(() => {
-    const tickets = report?.tickets ?? [];
+    const tickets = clubTickets;
     return {
       open: tickets.filter((ticket) => !ticket.cancelled && OPEN_STATUSES.includes(ticket.status)).length,
       paid: tickets.filter((ticket) => !ticket.cancelled && ticket.paymentStatus === 'PAID').length,
       due: tickets.filter((ticket) => !ticket.cancelled && ticket.due > 0).length,
       cancelled: tickets.filter((ticket) => ticket.cancelled).length,
     };
-  }, [report]);
+  }, [clubTickets]);
 
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return (report?.tickets ?? []).filter((ticket) => {
+    return clubTickets.filter((ticket) => {
       if (focus === 'open' && (ticket.cancelled || !OPEN_STATUSES.includes(ticket.status))) return false;
       if (focus === 'paid' && (ticket.cancelled || ticket.paymentStatus !== 'PAID')) return false;
       if (focus === 'due' && (ticket.cancelled || ticket.due <= 0)) return false;
@@ -135,7 +186,7 @@ export function ReportingPage() {
       const hay = `${ticket.orderNumber} ${ticket.customerName} ${ticket.tableName ?? ''} ${ticket.items.map((item) => item.name).join(' ')}`.toLowerCase();
       return hay.includes(needle);
     });
-  }, [report, focus, search]);
+  }, [clubTickets, focus, search]);
 
   useEffect(() => {
     const shown = Math.min(rows.length, 20);
@@ -148,15 +199,11 @@ export function ReportingPage() {
         name: 'Summary',
         rows: [
           ['Period', rangeLabel(range)],
-          ['Bills', report?.bills ?? 0],
-          ['Net sales', report?.net ?? 0],
-          ['Average ticket', report?.averageTicket ?? 0],
-          ['Collected', report?.collected ?? 0],
-          ['Still due', report?.due ?? 0],
-          ['Cancelled', report?.cancelled ?? 0],
-          ['Cash', report?.byMethod.CASH ?? 0],
-          ['UPI', report?.byMethod.UPI ?? 0],
-          ['Card', report?.byMethod.CARD ?? 0],
+          ['Bills', clubTickets.filter(countedSale).length],
+          ['Net sales', clubNet],
+          ['Average ticket', clubTickets.filter(countedSale).length ? Math.round(clubNet / clubTickets.filter(countedSale).length) : 0],
+          ['Still due', clubTickets.filter(countedSale).reduce((sum, ticket) => sum + ticket.due, 0)],
+          ['Cancelled', clubTickets.filter((ticket) => ticket.cancelled).length],
         ],
       },
       {
@@ -178,14 +225,14 @@ export function ReportingPage() {
         name: 'Items',
         rows: [
           ['Item', 'Qty', 'Amount'],
-          ...(report?.items ?? []).map((item) => [item.name, item.qty, item.amount]),
+          ...(report?.items ?? []).filter((item) => clubNames.has(item.name)).map((item) => [item.name, item.qty, item.amount]),
         ],
       },
       {
         name: 'Categories',
         rows: [
           ['Category', 'Qty', 'Amount'],
-          ...(report?.categories ?? []).map((item) => [item.name, item.qty, item.amount]),
+          ...slices.map((item) => [item.name, item.qty, item.amount]),
         ],
       },
     ]);
@@ -194,22 +241,28 @@ export function ReportingPage() {
   const peak = Math.max(...bars.map((bar) => bar.amount), 1);
   const categoryTotal = slices.reduce((sum, slice) => sum + slice.amount, 0);
   const first = pos.user?.name?.split(' ')[0] || 'there';
+  const liveBills = clubTickets.filter(countedSale);
+  const due = liveBills.reduce((sum, ticket) => sum + ticket.due, 0);
+  const collected = clubNet - due;
+  const average = liveBills.length ? Math.round(clubNet / liveBills.length) : 0;
 
   return (
     <div className="o-track">
       <header className="o-track__hello">
-        <div>
-          <h2>Hello, {first}</h2>
-          <p>{rangeLabel(range)} · {changeLabel(report?.net ?? 0, previousNet)}</p>
-        </div>
-        <label className="o-track__period">
-          <span>Period</span>
-          <select value={range} onChange={(event) => { setRange(event.target.value as Range); setFocus('all'); }}>
-            <option value="today">Today</option>
-            <option value="7">Last 7 days</option>
-            <option value="30">Last 30 days</option>
-          </select>
-        </label>
+        <h2>Hello, {first}</h2>
+        <Dropdown
+          label="Period"
+          value={range}
+          options={[
+            { value: 'today', label: 'Today' },
+            { value: '7', label: 'Last 7 days' },
+            { value: '30', label: 'Last 30 days' },
+          ]}
+          onChange={(value) => {
+            setRange(value as Range);
+            setFocus('all');
+          }}
+        />
       </header>
 
       {error ? <p className="o-track__error">{error}</p> : null}
@@ -217,23 +270,23 @@ export function ReportingPage() {
       <section className="o-track__kpis o-track__kpis--four">
         <article>
           <span>Net sales</span>
-          <strong>{report ? formatOdooINR(report.net) : '—'}</strong>
-          <em>{changeLabel(report?.net ?? 0, previousNet)}</em>
+          <strong>{report ? formatOdooINR(clubNet) : '—'}</strong>
+          <em>{changeLabel(clubNet, previousNet)}</em>
         </article>
         <article>
-          <span>Orders</span>
-          <strong>{report?.bills ?? '—'}</strong>
-          <em>{report?.cancelled ?? 0} cancelled</em>
+          <span>Sales bills</span>
+          <strong>{report ? liveBills.length : '—'}</strong>
+          <em>{clubTickets.filter((ticket) => ticket.cancelled).length} cancelled</em>
         </article>
         <article>
-          <span>Clients</span>
-          <strong>{new Set((report?.tickets ?? []).filter((ticket) => !ticket.cancelled).map((ticket) => ticket.customerName.trim() || 'Walk-in')).size}</strong>
-          <em>{pos.customers.length} saved in the book</em>
+          <span>Members and guests</span>
+          <strong>{new Set(liveBills.map((ticket) => ticket.customerName.trim() || 'Walk-in')).size}</strong>
+          <em>{gym?.visitors ?? 0} people on file</em>
         </article>
         <article>
           <span>Average ticket</span>
-          <strong>{report ? formatOdooINR(report.averageTicket) : '—'}</strong>
-          <em>{report ? formatOdooINR(report.collected) : '—'} collected</em>
+          <strong>{report ? formatOdooINR(average) : '—'}</strong>
+          <em>{report ? formatOdooINR(collected) : '—'} collected</em>
         </article>
       </section>
 
@@ -250,11 +303,6 @@ export function ReportingPage() {
               </div>
             ))}
           </div>
-          <p className="o-track__payline">
-            Cash {formatOdooINR(report?.byMethod.CASH ?? 0)}
-            <span>UPI {formatOdooINR(report?.byMethod.UPI ?? 0)}</span>
-            <span>Card {formatOdooINR(report?.byMethod.CARD ?? 0)}</span>
-          </p>
         </section>
 
         <section className="o-track__card">
@@ -276,14 +324,23 @@ export function ReportingPage() {
       </div>
 
       <section className="o-track__status">
-        <StatusCard label="Open orders" count={counts.open} hint="Still on the floor" active={focus === 'open'} tone="blue" onClick={() => setFocus(focus === 'open' ? 'all' : 'open')} />
+        <StatusCard label="Open bills" count={counts.open} hint="Not yet paid" active={focus === 'open'} tone="blue" onClick={() => setFocus(focus === 'open' ? 'all' : 'open')} />
         <StatusCard label="Paid" count={counts.paid} hint="Payment received" active={focus === 'paid'} tone="green" onClick={() => setFocus(focus === 'paid' ? 'all' : 'paid')} />
         <StatusCard label="Still due" count={counts.due} hint="Balance left" active={focus === 'due'} tone="amber" onClick={() => setFocus(focus === 'due' ? 'all' : 'due')} />
         <StatusCard label="Cancelled" count={counts.cancelled} hint="Not in net sales" active={focus === 'cancelled'} tone="red" onClick={() => setFocus(focus === 'cancelled' ? 'all' : 'cancelled')} />
       </section>
 
+      {gym ? (
+        <section className="o-track__status">
+          <article className="o-track__stat o-track__stat--plain"><span>Active visitors</span><strong>{gym.activeVisitors}</strong><em>Inside right now</em></article>
+          <article className="o-track__stat o-track__stat--plain"><span>People on file</span><strong>{gym.visitors}</strong><em>Visitors and members</em></article>
+          <article className="o-track__stat o-track__stat--plain"><span>Active memberships</span><strong>{gym.activeMemberships}</strong><em>Plans in force</em></article>
+          <article className="o-track__stat o-track__stat--plain"><span>Check-ins recorded</span><strong>{gym.attendance}</strong><em>All visits on file</em></article>
+        </section>
+      ) : null}
+
       <section className="o-track__card">
-        <h3>Orders {focus === 'all' ? '' : `· ${focus}`}</h3>
+        <h3>Sales {focus === 'all' ? '' : `· ${focus}`}</h3>
         <table className="o-track__table o-track__table--wide">
           <thead>
             <tr><th>Bill</th><th>Customer</th><th>Where</th><th>Items</th><th>Payment</th><th>Status</th><th>Total</th></tr>
@@ -292,7 +349,7 @@ export function ReportingPage() {
             {rows.slice(0, 20).map((ticket) => (
               <OrderRow key={ticket.id} ticket={ticket} />
             ))}
-            {!rows.length ? <tr><td colSpan={7}>{search.trim() ? 'Nothing matches that search.' : 'No orders in this view.'}</td></tr> : null}
+            {!rows.length ? <tr><td colSpan={7}>{search.trim() ? 'Nothing matches that search.' : 'No sales in this period.'}</td></tr> : null}
           </tbody>
         </table>
       </section>
@@ -329,7 +386,7 @@ function OrderRow({ ticket }: { ticket: SalesTicket }) {
     <tr>
       <td>#{ticket.orderNumber || '—'}</td>
       <td>{ticket.customerName || 'Walk-in'}</td>
-      <td>{ticket.tableName || ticket.channel}</td>
+      <td>{ticket.tableName || (ticket.channel === 'dine' ? 'At the club' : 'Desk')}</td>
       <td>{ticket.items.map((item) => `${item.qty}× ${item.name}`).join(', ') || '—'}</td>
       <td>{ticket.paymentStatus === 'PAID' ? 'Paid' : ticket.due > 0 ? 'Due' : ticket.paymentStatus}</td>
       <td><b className={ticket.cancelled ? 'is-cancelled' : ''}>{ticket.cancelled ? 'Cancelled' : ticket.status}</b></td>

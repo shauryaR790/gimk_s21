@@ -32,15 +32,16 @@ export function AdGuestHeroNav({
   return (
     <header className={`ad-guest-hero-nav ad-guest-hero-nav--${tone}`} aria-label="Site">
       <Link className="ad-guest-hero-nav-brand" to={homeHref}>
-        After Dunes
+        Gymkhana
       </Link>
       <nav className="ad-guest-hero-nav-links" aria-label="Primary">
         <Link to={homeHref} className={linkClass('home')}>
           Home
         </Link>
         <Link to={menuHref} className={linkClass('menu')}>
-          Menu
+          Refreshments
         </Link>
+        <Link to="/member" className="ad-guest-hero-nav-link">Member</Link>
         <Link to="/cart" className={linkClass('cart')} onClick={() => saveMenuScroll()}>
           Cart{cartCount > 0 ? ` (${cartCount})` : ''}
         </Link>

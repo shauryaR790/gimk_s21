@@ -52,6 +52,7 @@ import { AppError, applySyncBatch, cancelCheckout, cancelReservation, clearAllCu
 import { createRazorpayOrder, publicRazorpayKey, RazorpayError, verifyRazorpayPayment } from './razorpay';
 import { otpProvider } from './otp';
 import { openStream, touchDevice } from './realtime';
+import { registerGymRoutes } from './gymkhana';
 import {
   cashMove,
   closeSession,
@@ -103,7 +104,7 @@ app.use((req, res, next) => {
     next();
     return;
   }
-  express.json({ limit: '256kb' })(req, res, next);
+  express.json({ limit: req.path.startsWith('/api/gym/') ? '2mb' : '256kb' })(req, res, next);
 });
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -565,6 +566,8 @@ app.put('/api/pos/floors', requireAuth, wrap((req, res) => {
   const geometry = Array.isArray(req.body?.geometry) ? req.body.geometry : [];
   res.json(saveFloors({ floors, geometry }));
 }));
+
+registerGymRoutes(app, { requireAuth, wrap });
 
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found.', code: 'NOT_FOUND' });

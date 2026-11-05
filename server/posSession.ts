@@ -76,7 +76,7 @@ export function ensurePosDefaults() {
     run('INSERT INTO pos_configs (id, cafe_id, name, is_restaurant) VALUES (?, ?, ?, 1)', [
       DEFAULT_CONFIG_ID,
       CAFE_ID,
-      'Restaurant',
+      'Gymkhana',
     ]);
   }
   // Extra register configs are created on demand via New Register — do not auto-seed a second card.

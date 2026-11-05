@@ -10,7 +10,7 @@ const DEMO_EMAIL = 'admin@habs.cafe';
 const DEMO_PASSWORD = 'habsos-admin';
 
 export function LoginPage() {
-  useTitle('Point of Sale');
+  useTitle('Gymkhana');
   const navigate = useNavigate();
   const [pin, setPin] = useState('');
   const [email, setEmail] = useState('');
@@ -85,7 +85,7 @@ export function LoginPage() {
         <div className="o-login__card o-login__card--busy">
           <img src="/ui/pos-awning.png" alt="" className="o-login__logo" width={48} height={44} />
           <div className="o-loading-bar"><span /></div>
-          <p>Opening Point of Sale…</p>
+          <p>Opening Gymkhana…</p>
         </div>
       </main>
     );
@@ -97,7 +97,7 @@ export function LoginPage() {
         <div className="o-login__brand">
           <img src="/ui/pos-awning.png" alt="" className="o-login__logo" width={48} height={44} />
           <div>
-            <p className="o-login__eyebrow">Point of Sale</p>
+            <p className="o-login__eyebrow">Gymkhana</p>
             <h1>Sign in</h1>
           </div>
         </div>

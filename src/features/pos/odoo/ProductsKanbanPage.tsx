@@ -20,8 +20,18 @@ function ProductThumb({ src }: { src: string }) {
   return <img src={fitted ?? src} alt="" data-fit={fitted ? 'ready' : 'pending'} />;
 }
 
+const SPORTS = new Set([
+  'cat_facility',
+  'cat_membership',
+  'cat_classes',
+  'cat_coaching',
+  'cat_rentals',
+  'cat_merch',
+  'cat_other_services',
+]);
+
 export function ProductsKanbanPage() {
-  useTitle('Products');
+  useTitle('Services & Products');
   const navigate = useNavigate();
   const { items } = usePos();
   const [q, setQ] = useState('');
@@ -29,7 +39,7 @@ export function ProductsKanbanPage() {
     const needle = q.trim().toLowerCase();
     const seen = new Set<string>();
     return items
-      .filter((item) => item.isAvailable)
+      .filter((item) => item.isAvailable && SPORTS.has(item.categoryId))
       .filter((item) => {
         const img = item.imageUrl ?? '';
         if (/\.(jpe?g|webp)(\?|$)/i.test(img) || img.includes('/studio/')) return false;
@@ -44,7 +54,7 @@ export function ProductsKanbanPage() {
     <>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
         <button type="button" className="o-btn o-btn--primary" onClick={() => navigate('/pos/backend/products/new')}>New</button>
-        <h2 style={{ margin: 0, flex: 1 }}>Products</h2>
+        <h2 style={{ margin: 0, flex: 1 }}>Services & Products</h2>
         <label className="o-search" style={{ minWidth: 240 }}>
           <span>⌕</span>
           <input placeholder="Search..." value={q} onChange={(e) => setQ(e.target.value)} />

@@ -246,14 +246,14 @@ export function FoHBurgerMenu({ open, onClose, onCashInOut, onCloseRegister }: P
   }
 
   const tiles: Tile[] = [
-    { id: 'display', label: 'Customer Display', icon: <MonitorIcon />, onClick: openCustomerDisplay },
+    { id: 'display', label: 'Member Display', icon: <MonitorIcon />, onClick: openCustomerDisplay },
     { id: 'dark', label: dark ? 'Switch to Light Mode' : 'Switch to Dark Mode', icon: <MoonIcon />, onClick: toggleDark },
     { id: 'install', label: 'Install App', icon: <InstallIcon />, onClick: () => void installApp() },
     { id: 'cash', label: 'Cash In/Out', icon: <CashIcon />, onClick: () => { onClose(); onCashInOut(); } },
     { id: 'reload', label: 'Reload Data', icon: <ReloadIcon />, onClick: () => void reloadData() },
-    { id: 'product', label: 'Create Product', icon: <PlusIcon />, onClick: () => { onClose(); navigate('/pos/menu'); } },
+    { id: 'product', label: 'Create Service', icon: <PlusIcon />, onClick: () => { onClose(); navigate('/pos/menu'); } },
     { id: 'floor', label: 'Switch Floor View', icon: <EyeIcon />, onClick: switchFloorView },
-    { id: 'backend', label: 'Backend', icon: <BackIcon />, onClick: () => { onClose(); navigate('/pos'); } },
+    { id: 'backend', label: 'Dashboard', icon: <BackIcon />, onClick: () => { onClose(); navigate('/pos'); } },
   ];
 
   return (

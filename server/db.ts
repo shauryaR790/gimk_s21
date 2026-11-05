@@ -336,6 +336,246 @@ CREATE TABLE IF NOT EXISTS table_geometry (
 );
 `);
   addColumn(database, 'pos_sessions', 'sequence', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn(database, 'customers', 'member_code', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'customers', 'membership_status', "TEXT NOT NULL DEFAULT 'PENDING'");
+  addColumn(database, 'customers', 'plan_id', 'TEXT');
+  addColumn(database, 'customers', 'membership_expires_at', 'TEXT');
+  addColumn(database, 'customers', 'photo_url', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'customers', 'emergency_contact', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'customers', 'notify_prefs', "TEXT NOT NULL DEFAULT 'sms,email'");
+  addColumn(database, 'customers', 'frozen_until', 'TEXT');
+  addColumn(database, 'customers', 'access_interest', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'customers', 'govt_id_label', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'customers', 'govt_id_url', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'customers', 'coach_id', 'TEXT');
+  addColumn(database, 'customers', 'notes', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'users', 'phone', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'users', 'specialization', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'users', 'schedule_json', "TEXT NOT NULL DEFAULT ''");
+  database.exec(`
+CREATE TABLE IF NOT EXISTS facilities (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL REFERENCES cafes(id),
+  name TEXT NOT NULL,
+  sport TEXT NOT NULL,
+  image_url TEXT NOT NULL DEFAULT '',
+  location TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  capacity INTEGER NOT NULL DEFAULT 1,
+  opens_at TEXT NOT NULL DEFAULT '06:00',
+  closes_at TEXT NOT NULL DEFAULT '22:00',
+  slot_minutes INTEGER NOT NULL DEFAULT 60,
+  member_price INTEGER NOT NULL DEFAULT 0,
+  guest_price INTEGER NOT NULL DEFAULT 0,
+  is_available INTEGER NOT NULL DEFAULT 1,
+  maintenance_status TEXT NOT NULL DEFAULT 'OK',
+  access_rule TEXT NOT NULL DEFAULT 'BOOKING',
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS membership_plans (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL REFERENCES cafes(id),
+  name TEXT NOT NULL,
+  duration_days INTEGER NOT NULL,
+  price INTEGER NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  facility_access TEXT NOT NULL DEFAULT 'ALL',
+  booking_privileges TEXT NOT NULL DEFAULT '',
+  discount_bps INTEGER NOT NULL DEFAULT 0,
+  guest_passes INTEGER NOT NULL DEFAULT 0,
+  renewal_days INTEGER NOT NULL DEFAULT 7,
+  freeze_days INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memberships (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL REFERENCES cafes(id),
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  plan_id TEXT NOT NULL REFERENCES membership_plans(id),
+  status TEXT NOT NULL,
+  starts_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  frozen_until TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS bookings (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL REFERENCES cafes(id),
+  facility_id TEXT NOT NULL REFERENCES facilities(id),
+  customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
+  member_name TEXT NOT NULL,
+  member_mobile TEXT NOT NULL DEFAULT '',
+  sport TEXT NOT NULL,
+  start_at TEXT NOT NULL,
+  end_at TEXT NOT NULL,
+  participants INTEGER NOT NULL DEFAULT 1,
+  amount INTEGER NOT NULL,
+  discount INTEGER NOT NULL DEFAULT 0,
+  payment_status TEXT NOT NULL DEFAULT 'UNPAID',
+  status TEXT NOT NULL DEFAULT 'CONFIRMED',
+  payment_method TEXT NOT NULL DEFAULT '',
+  order_id TEXT,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS booking_participants (
+  id TEXT PRIMARY KEY,
+  booking_id TEXT NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  mobile TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_bookings_facility ON bookings(facility_id, start_at, end_at, status);
+CREATE TABLE IF NOT EXISTS trainers (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL REFERENCES cafes(id),
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL DEFAULT '',
+  specialization TEXT NOT NULL DEFAULT '',
+  availability TEXT NOT NULL DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS gym_classes (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL REFERENCES cafes(id),
+  name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT '',
+  trainer_id TEXT REFERENCES trainers(id),
+  schedule TEXT NOT NULL DEFAULT '',
+  duration_minutes INTEGER NOT NULL DEFAULT 60,
+  capacity INTEGER NOT NULL DEFAULT 12,
+  price INTEGER NOT NULL DEFAULT 0,
+  description TEXT NOT NULL DEFAULT '',
+  is_private INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS class_registrations (
+  id TEXT PRIMARY KEY,
+  class_id TEXT NOT NULL REFERENCES gym_classes(id),
+  customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'REGISTERED',
+  attended INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS equipment_rentals (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL REFERENCES cafes(id),
+  customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
+  member_name TEXT NOT NULL,
+  equipment_name TEXT NOT NULL,
+  inventory_item_id TEXT,
+  issued_at TEXT NOT NULL,
+  due_at TEXT NOT NULL,
+  returned_at TEXT,
+  fee INTEGER NOT NULL DEFAULT 0,
+  deposit INTEGER NOT NULL DEFAULT 0,
+  condition TEXT NOT NULL DEFAULT 'GOOD',
+  status TEXT NOT NULL DEFAULT 'ISSUED'
+);
+CREATE TABLE IF NOT EXISTS check_ins (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL REFERENCES cafes(id),
+  customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
+  member_name TEXT NOT NULL,
+  booking_id TEXT,
+  facility_name TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'MEMBER',
+  fee INTEGER NOT NULL DEFAULT 0,
+  payment_status TEXT NOT NULL DEFAULT 'UNPAID',
+  checked_in_at TEXT NOT NULL,
+  checked_out_at TEXT
+);
+CREATE TABLE IF NOT EXISTS maintenance_records (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL REFERENCES cafes(id),
+  facility_id TEXT NOT NULL REFERENCES facilities(id),
+  title TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'OPEN',
+  starts_at TEXT NOT NULL,
+  ends_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL REFERENCES cafes(id),
+  audience TEXT NOT NULL DEFAULT 'staff',
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  read_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS announcements (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL REFERENCES cafes(id),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL REFERENCES cafes(id),
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  entity TEXT NOT NULL,
+  entity_id TEXT NOT NULL DEFAULT '',
+  message TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS desk_shifts (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL,
+  subject_type TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  subject_name TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT
+);
+CREATE TABLE IF NOT EXISTS employee_attendance (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL,
+  noted_at TEXT NOT NULL,
+  actor TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS trainer_sessions (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL,
+  shift_id TEXT NOT NULL,
+  trainer_id TEXT NOT NULL DEFAULT '',
+  trainer_name TEXT NOT NULL,
+  session_date TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  duration_minutes INTEGER NOT NULL DEFAULT 60,
+  facility TEXT NOT NULL DEFAULT '',
+  activity TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'Group class',
+  participants INTEGER NOT NULL DEFAULT 1,
+  visitors TEXT NOT NULL DEFAULT '',
+  amount INTEGER NOT NULL DEFAULT 0,
+  payment TEXT NOT NULL DEFAULT 'Included in plan',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trainer_sessions_shift ON trainer_sessions(shift_id);
+`);
+  addColumn(database, 'trainers', 'email', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'trainers', 'govt_id_label', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'trainers', 'govt_id_url', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'trainers', 'notes', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'trainers', 'offers', "TEXT NOT NULL DEFAULT 'group,private'");
+  addColumn(database, 'bookings', 'created_by', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'check_ins', 'checked_in_by', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'maintenance_records', 'actor', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'desk_shifts', 'phone', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'desk_shifts', 'email', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'desk_shifts', 'role_label', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'desk_shifts', 'govt_id_label', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'desk_shifts', 'govt_id_url', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'desk_shifts', 'areas', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'desk_shifts', 'notes', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'desk_shifts', 'opened_by', "TEXT NOT NULL DEFAULT ''");
   const userVersion = (database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
   if (userVersion < 2) {
     database.exec('UPDATE orders SET customer_id = NULL');

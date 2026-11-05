@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { taxLabel, type MenuItem, type ProductSheet } from '../../../../shared/domain';
-import { INGREDIENT_IDS, INGREDIENT_LABELS, type IngredientId } from '../../../../shared/menuDisplay';
+import { INGREDIENT_IDS, type IngredientId } from '../../../../shared/menuDisplay';
 import { api } from '../../../lib/api';
 import { fitProductImage } from '../../../lib/fitProductImage';
 import { useTitle } from '../../../lib/useTitle';
 import { usePos } from '../PosContext';
+import { Dropdown } from '../gym/record';
 
 type Tab = 'general' | 'attributes' | 'sales' | 'pos' | 'inventory';
 
@@ -18,7 +19,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 const BLANK_SHEET: ProductSheet = {
-  productType: 'goods',
+        productType: 'service',
   trackInventory: false,
   sales: true,
   purchase: true,
@@ -105,7 +106,8 @@ export function ProductFormPage() {
   const item = live ?? (held && held.id === id ? held : null);
   useTitle(isNew ? 'New product' : item?.name ?? 'Product');
 
-  const ordered = pos.items.filter((entry) => entry.isAvailable).slice().sort((a, b) => a.name.localeCompare(b.name));
+  const sportsIds = new Set(['cat_facility', 'cat_membership', 'cat_classes', 'cat_coaching', 'cat_rentals', 'cat_merch', 'cat_other_services']);
+  const ordered = pos.items.filter((entry) => entry.isAvailable && sportsIds.has(entry.categoryId)).slice().sort((a, b) => a.name.localeCompare(b.name));
   const index = item ? ordered.findIndex((entry) => entry.id === item.id) : -1;
 
   const [tab, setTab] = useState<Tab>('general');
@@ -127,7 +129,7 @@ export function ProductFormPage() {
       setPrice('1.00');
       setNotes('');
       setFavorite(false);
-      setCategoryId('');
+      setCategoryId(pos.categories.find((category) => sportsIds.has(category.id))?.id ?? '');
       setImageUrl(null);
       setSheet({ ...BLANK_SHEET });
       setIngredients([]);
@@ -166,7 +168,7 @@ export function ProductFormPage() {
   async function createFromDraft(nextName: string) {
     const clean = nextName.trim();
     if (!clean || item || saving) return;
-    const category = categoryId || pos.categories[0]?.id;
+    const category = categoryId || pos.categories.find((entry) => sportsIds.has(entry.id))?.id;
     if (!category) return;
     const amount = parseMoney(price) ?? 1;
     const codes = shortcutsFromReference(sheet.reference);
@@ -203,32 +205,6 @@ export function ProductFormPage() {
       ...(codes ? codes : {}),
       ...extra,
     });
-  }
-
-  function toggleIngredient(id: IngredientId) {
-    const next = ingredients.includes(id)
-      ? ingredients.filter((entry) => entry !== id)
-      : [...ingredients, id].slice(0, 8);
-    setIngredients(next);
-    if (item) void persist({ ingredients: next });
-  }
-
-  function IngredientPicker() {
-    return (
-      <div className="o-ings" role="group" aria-label="Ingredients">
-        {INGREDIENT_IDS.map((id) => (
-          <button
-            key={id}
-            type="button"
-            className={ingredients.includes(id) ? 'is-on' : ''}
-            aria-pressed={ingredients.includes(id)}
-            onClick={() => toggleIngredient(id)}
-          >
-            {INGREDIENT_LABELS[id]}
-          </button>
-        ))}
-      </div>
-    );
   }
 
   if (!isNew && !item) {
@@ -298,7 +274,7 @@ export function ProductFormPage() {
                 <input
                   className="o-prod__title"
                   value={name}
-                  placeholder="e.g. Cheese Burger"
+                  placeholder="e.g. Court booking"
                   aria-label="Product name"
                   onChange={(event) => setName(event.target.value)}
                   onBlur={() => {
@@ -377,18 +353,13 @@ export function ProductFormPage() {
                   ))}
                 </div>
                 <label className="o-prod__field o-prod__field--row">
-                  <span>Track Inventory <i className="o-prod__req">*</i></span>
+                  <span>Track stock <i className="o-prod__req">*</i></span>
                   <input
                     type="checkbox"
                     checked={sheet.trackInventory}
                     onChange={(e) => updateSheet({ trackInventory: e.target.checked })}
                   />
                 </label>
-                <div className="o-prod__ings">
-                  <span>Ingredients</span>
-                  <IngredientPicker />
-                  <p>Each selected ingredient is drawn from stock when this item is sold.</p>
-                </div>
               </div>
               <div className="o-prod__col">
                 <label className="o-prod__field">
@@ -409,17 +380,17 @@ export function ProductFormPage() {
                   </span>
                   <em>per Units</em>
                 </label>
-                <label className="o-prod__field">
+                <div className="o-prod__field">
                   <span>Sales Taxes <i className="o-prod__req">*</i></span>
-                  <select
+                  <Dropdown
+                    variant="field"
+                    label="Sales taxes"
+                    placeholder=""
                     value={sheet.salesTax}
-                    aria-label="Sales taxes"
-                    onChange={(event) => updateSheet({ salesTax: event.target.value })}
-                  >
-                    <option value="" />
-                    {taxOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                  </select>
-                </label>
+                    options={taxOptions.map((option) => ({ value: option, label: option }))}
+                    onChange={(value) => updateSheet({ salesTax: value })}
+                  />
+                </div>
                 <label className="o-prod__field">
                   <span>Cost</span>
                   <span className="o-prod__money">
@@ -433,34 +404,33 @@ export function ProductFormPage() {
                     />
                   </span>
                 </label>
-                <label className="o-prod__field">
+                <div className="o-prod__field">
                   <span>Purchase Taxes <i className="o-prod__req">*</i></span>
-                  <select
+                  <Dropdown
+                    variant="field"
+                    label="Purchase taxes"
+                    placeholder=""
                     value={sheet.purchaseTax}
-                    aria-label="Purchase taxes"
-                    onChange={(event) => updateSheet({ purchaseTax: event.target.value })}
-                  >
-                    <option value="" />
-                    {taxOptions.map((option) => <option key={`p-${option}`} value={option}>{option}</option>)}
-                  </select>
-                </label>
-                <label className="o-prod__field">
+                    options={taxOptions.map((option) => ({ value: option, label: option }))}
+                    onChange={(value) => updateSheet({ purchaseTax: value })}
+                  />
+                </div>
+                <div className="o-prod__field">
                   <span>Category</span>
-                  <select
+                  <Dropdown
+                    variant="field"
+                    label="Category"
+                    placeholder=""
                     value={categoryId}
-                    aria-label="Category"
-                    onChange={(event) => {
-                      const next = event.target.value;
+                    options={pos.categories
+                      .filter((category) => ['cat_facility', 'cat_membership', 'cat_classes', 'cat_coaching', 'cat_rentals', 'cat_merch', 'cat_other_services'].includes(category.id))
+                      .map((category) => ({ value: category.id, label: category.name }))}
+                    onChange={(next) => {
                       setCategoryId(next);
                       if (item && next) void persist({ categoryId: next });
                     }}
-                  >
-                    <option value="" />
-                    {pos.categories.map((category) => (
-                      <option key={category.id} value={category.id}>{category.name}</option>
-                    ))}
-                  </select>
-                </label>
+                  />
+                </div>
                 <label className="o-prod__field">
                   <span>Reference</span>
                   <input
@@ -491,11 +461,7 @@ export function ProductFormPage() {
               </div>
             </div>
           ) : tab === 'inventory' ? (
-            <div className="o-prod__ings o-prod__ings--tab">
-              <span>Ingredients</span>
-              <IngredientPicker />
-              <p>Pick what this dish uses. Sales on the register reduce those stock lines on the inventory page.</p>
-            </div>
+            <p className="o-prod__empty">Stock for this service is counted on the inventory page, by piece.</p>
           ) : (
             <p className="o-prod__empty">Nothing extra on this tab yet.</p>
           )}

@@ -12,6 +12,16 @@ import { MenuPage } from './features/customer/MenuPage';
 import { OrderPage } from './features/customer/OrderPage';
 import { TableQrPage } from './features/customer/TableQrPage';
 import { LoginPage } from './features/pos/LoginPage';
+import {
+  MemberBookingsPage,
+  MemberBookPage,
+  MemberClassesPage,
+  MemberEventsPage,
+  MemberHomePage,
+  MemberPaymentsPage,
+  MemberPlansPage,
+  MemberProfilePage,
+} from './features/member/portal';
 import { resetScrollLock } from './lib/scrollLock';
 
 const PosShell = lazy(() => import('./features/pos/PosShell'));
@@ -51,6 +61,14 @@ export function App() {
               <Route path="/checkout" element={<CheckoutPage />} />
             </Route>
             <Route path="/order/:id" element={<OrderPage />} />
+            <Route path="/member" element={<MemberHomePage />} />
+            <Route path="/member/book" element={<MemberBookPage />} />
+            <Route path="/member/plans" element={<MemberPlansPage />} />
+            <Route path="/member/bookings" element={<MemberBookingsPage />} />
+            <Route path="/member/classes" element={<MemberClassesPage />} />
+            <Route path="/member/events" element={<MemberEventsPage />} />
+            <Route path="/member/payments" element={<MemberPaymentsPage />} />
+            <Route path="/member/profile" element={<MemberProfilePage />} />
             <Route path="/pos/login" element={<LoginPage />} />
             <Route path="/pos/*" element={<Suspense fallback={<div className="o-screen-state"><LoadingState label="Loading" /></div>}><PosShell /></Suspense>} />
             <Route path="*" element={<main className="cust narrow"><h1>Page not found</h1></main>} />

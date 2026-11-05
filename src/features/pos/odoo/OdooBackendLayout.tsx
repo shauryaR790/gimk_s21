@@ -5,11 +5,37 @@ import { api } from '../../../lib/api';
 import { downloadExcel, type ExcelSheet } from '../../../lib/excel';
 import { usePos } from '../PosContext';
 
-const ORDERS_MENU = [
-  { to: '/pos/backend/orders', label: 'Orders' },
-  { to: '/pos/backend/sessions', label: 'Sessions' },
-  { to: '/pos/backend/preparation', label: 'Preparation Display' },
-  { to: '/pos/backend/customers', label: 'Customers' },
+const NAV_MENUS = [
+  {
+    label: 'Operations',
+    items: [
+      { to: '/pos/backend/bookings', label: 'Bookings' },
+      { to: '/pos/backend/shift', label: 'Shift' },
+      { to: '/pos/backend/classes', label: 'Classes & Coaching' },
+      { to: '/pos/backend/sessions', label: 'Sessions' },
+    ],
+  },
+  {
+    label: 'People',
+    items: [
+      { to: '/pos/backend/visitors', label: 'Visitors' },
+      { to: '/pos/backend/memberships', label: 'Memberships' },
+      { to: '/pos/backend/employees', label: 'Employees' },
+    ],
+  },
+  {
+    label: 'Place',
+    items: [
+      { to: '/pos/backend/facilities', label: 'Facilities' },
+      { to: '/pos/backend/maintenance', label: 'Maintenance' },
+    ],
+  },
+  {
+    label: 'Stock',
+    items: [
+      { to: '/pos/backend/inventory', label: 'Inventory' },
+    ],
+  },
 ] as const;
 
 export type BackendChromeContext = {
@@ -113,16 +139,30 @@ function ChevronIcon({ dir }: { dir: 'left' | 'right' }) {
 }
 
 function controlTitle(pathname: string) {
-  if (pathname.includes('/backend/orders')) return 'Orders';
+  if (pathname === '/pos' || pathname.endsWith('/pos') || pathname.includes('/backend/reporting') || pathname.endsWith('/reports')) return 'Dashboard';
+  if (pathname.includes('/backend/overview')) return 'Overview';
+  if (pathname.includes('/backend/bookings')) return 'Bookings';
+  if (pathname.includes('/backend/orders')) return 'Bookings & Sales';
   if (pathname.includes('/backend/sessions')) return 'Sessions';
   if (pathname.includes('/backend/payments')) return 'Payments';
-  if (pathname.includes('/backend/preparation')) return 'Preparation Display';
-  if (pathname.includes('/backend/customers') || pathname.endsWith('/customers')) return 'Customers';
-  if (pathname.includes('/backend/products')) return 'Products';
+  if (pathname.includes('/backend/preparation')) return 'Activity Schedule';
+  if (pathname.includes('/backend/visitors') || pathname.includes('/backend/members')) return 'Visitors';
+  if (pathname.includes('/backend/plans')) return 'Memberships';
+  if (pathname.includes('/backend/trainers')) return 'Trainers';
+  if (pathname.includes('/backend/shift')) return 'Shift';
+  if (pathname.includes('/backend/memberships')) return 'Memberships';
+  if (pathname.includes('/backend/employees')) return 'Employees';
+  if (pathname.includes('/backend/facilities')) return 'Facilities';
+  if (pathname.includes('/backend/maintenance')) return 'Maintenance';
+  if (pathname.includes('/backend/check-in')) return 'Check-in';
+  if (pathname.includes('/backend/classes') || pathname.includes('/backend/participants')) return 'Classes & Coaching';
+  if (pathname.includes('/backend/rentals')) return 'Equipment Rentals';
+  if (pathname.includes('/backend/notifications')) return 'Notifications';
+  if (pathname.includes('/backend/customers') || pathname.endsWith('/customers')) return 'Members';
+  if (pathname.includes('/backend/products')) return 'Services & Products';
   if (pathname.includes('/backend/inventory') || pathname.endsWith('/inventory')) return 'Inventory';
-  if (pathname.includes('/backend/reporting')) return 'Reporting';
-  if (pathname.includes('/backend/config')) return 'Configuration';
-  return 'Point of Sale';
+  if (pathname.includes('/backend/config')) return 'Settings';
+  return 'Gymkhana';
 }
 
 export function OdooBackendLayout() {
@@ -130,9 +170,8 @@ export function OdooBackendLayout() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const initial = (user?.name ?? 'S').trim().charAt(0).toUpperCase() || 'S';
-  const isDashboard = pathname === '/pos' || pathname.endsWith('/pos');
-  const isOrdersSection = ORDERS_MENU.some((item) => pathname.startsWith(item.to));
-  const [ordersOpen, setOrdersOpen] = useState(false);
+  const isDashboard = pathname.includes('/backend/overview');
+  const [menuKey, setMenuKey] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [titleOpen, setTitleOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -144,16 +183,16 @@ export function OdooBackendLayout() {
   const isListView = pathname.includes('/backend/orders') || pathname.includes('/backend/sessions');
 
   useEffect(() => {
-    if (!ordersOpen && !menuOpen && !titleOpen) return;
+    if (!menuKey && !menuOpen && !titleOpen) return;
     function onDoc(e: MouseEvent) {
       const target = e.target as Node;
-      if (ordersOpen && !ordersRef.current?.contains(target)) setOrdersOpen(false);
+      if (menuKey && !ordersRef.current?.contains(target)) setMenuKey(null);
       if (menuOpen && !menuRef.current?.contains(target)) setMenuOpen(false);
       if (titleOpen && !titleRef.current?.contains(target)) setTitleOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        setOrdersOpen(false);
+        setMenuKey(null);
         setMenuOpen(false);
         setTitleOpen(false);
       }
@@ -165,10 +204,10 @@ export function OdooBackendLayout() {
       document.removeEventListener('click', onDoc);
       document.removeEventListener('keydown', onKey);
     };
-  }, [ordersOpen, menuOpen, titleOpen]);
+  }, [menuKey, menuOpen, titleOpen]);
 
   useEffect(() => {
-    setOrdersOpen(false);
+    setMenuKey(null);
     setMenuOpen(false);
     setTitleOpen(false);
     setSearch('');
@@ -180,69 +219,65 @@ export function OdooBackendLayout() {
       <header className="o-be-nav o-be-nav--light">
         <div className="o-be-nav__brand">
           <AwningIcon />
-          <span>Point of Sale</span>
+          <span>Gymkhana</span>
         </div>
         <nav className="o-be-nav__links">
           <NavLink to="/pos" end className={({ isActive }) => `o-be-nav__link${isActive ? ' is-active' : ''}`}>
             Dashboard
           </NavLink>
 
-          <div className={`o-be-nav__menu${ordersOpen ? ' is-open' : ''}`} ref={ordersRef}>
-            <button
-              type="button"
-              className={`o-be-nav__link o-be-nav__link--menu${isOrdersSection ? ' is-active' : ''}${ordersOpen ? ' is-open' : ''}`}
-              aria-expanded={ordersOpen}
-              aria-haspopup="menu"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOrdersOpen((v) => !v);
-              }}
-            >
-              Orders
-            </button>
-            {ordersOpen ? (
-              <div
-                className="o-be-dropdown"
-                role="menu"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {ORDERS_MENU.map((item) => (
-                  <button
-                    key={item.to}
-                    type="button"
-                    role="menuitem"
-                    className={`o-be-dropdown__item${pathname.startsWith(item.to) ? ' is-on' : ''}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOrdersOpen(false);
-                      navigate(item.to);
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
+          {NAV_MENUS.map((menu) => {
+            const sectionOn = menu.items.some((item) => pathname.startsWith(item.to));
+            const opened = menuKey === menu.label;
+            return (
+              <div key={menu.label} className={`o-be-nav__menu${opened ? ' is-open' : ''}`} ref={opened ? ordersRef : undefined}>
+                <button
+                  type="button"
+                  className={`o-be-nav__link o-be-nav__link--menu${sectionOn ? ' is-active' : ''}${opened ? ' is-open' : ''}`}
+                  aria-expanded={opened}
+                  aria-haspopup="menu"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuKey((current) => (current === menu.label ? null : menu.label));
+                  }}
+                >
+                  {menu.label}
+                </button>
+                {opened ? (
+                  <div className="o-be-dropdown" role="menu" onClick={(e) => e.stopPropagation()}>
+                    {menu.items.map((item) => (
+                      <button
+                        key={item.to}
+                        type="button"
+                        role="menuitem"
+                        className={`o-be-dropdown__item${pathname.startsWith(item.to) ? ' is-on' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuKey(null);
+                          navigate(item.to);
+                        }}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-          </div>
+            );
+          })}
 
           <NavLink to="/pos/backend/products" className={({ isActive }) => `o-be-nav__link${isActive ? ' is-active' : ''}`}>
-            Products
-          </NavLink>
-          <NavLink to="/pos/backend/inventory" className={({ isActive }) => `o-be-nav__link${isActive ? ' is-active' : ''}`}>
-            Inventory
-          </NavLink>
-          <NavLink to="/pos/backend/reporting" className={({ isActive }) => `o-be-nav__link${isActive ? ' is-active' : ''}`}>
-            Reporting
+            Services & Products
           </NavLink>
           <NavLink to="/pos/backend/config" className={({ isActive }) => `o-be-nav__link${isActive ? ' is-active' : ''}`}>
-            Configuration
+            Settings
           </NavLink>
         </nav>
         <div className="o-be-nav__right">
           <label className="o-search o-search--nav">
             <SearchIcon />
             <input
-              placeholder="Search products..."
+              placeholder="Search services..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -278,14 +313,17 @@ export function OdooBackendLayout() {
             </button>
             {menuOpen ? (
               <div className="o-be-dropdown o-be-dropdown--right" role="menu" onClick={(e) => e.stopPropagation()}>
-                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/app/tables'); }}>
-                  Open Register
+                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/app/register'); }}>
+                  Open POS
                 </button>
                 <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/products'); }}>
-                  Products
+                  Services & Products
                 </button>
-                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/customers'); }}>
-                  Customers
+                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/visitors'); }}>
+                  Visitors
+                </button>
+                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/notifications'); }}>
+                  Notifications
                 </button>
                 <button
                   type="button"
@@ -332,7 +370,7 @@ export function OdooBackendLayout() {
                   className="o-be-dropdown__item"
                   onClick={() => {
                     setTitleOpen(false);
-                    if (pathname.includes('/backend/reporting')) {
+                    if (pathname === '/pos' || pathname.endsWith('/pos') || pathname.includes('/backend/reporting')) {
                       window.dispatchEvent(new CustomEvent('habsos-report-action', { detail: { type: 'export' } }));
                       return;
                     }
@@ -376,7 +414,7 @@ export function OdooBackendLayout() {
               type="button"
               className={`o-be-icon o-be-icon--bare${!isListView && isDashboard ? ' is-on' : ''}`}
               aria-label="Kanban"
-              onClick={() => navigate('/pos')}
+              onClick={() => navigate('/pos/backend/overview')}
             >
               <KanbanIcon />
             </button>

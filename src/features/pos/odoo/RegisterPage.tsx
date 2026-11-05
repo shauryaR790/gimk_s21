@@ -1,12 +1,22 @@
-import { useMemo, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { canTransition, formatOdooINR, priceCart, type CartLineInput } from '../../../../shared/domain';
+import { canTransition, formatOdooINR, priceCart, type CartLineInput, type MenuItem } from '../../../../shared/domain';
 import { pushToast } from '../../../components/Toast';
+import { api } from '../../../lib/api';
 import { useTitle } from '../../../lib/useTitle';
 import { usePos } from '../PosContext';
 
 type Mode = 'qty' | 'disc' | 'price';
-type PosTab = 'all' | 'food' | 'drinks';
+type MemberHit = {
+  id: string;
+  name: string;
+  mobile: string;
+  memberCode: string;
+  planName: string;
+  membershipStatus: string;
+  expiresAt: string | null;
+  discountBps: number;
+};
 
 const ACCENT_BY_NAME: Record<string, string> = {
   'Bacon Burger': '#fd7e14',
@@ -96,37 +106,58 @@ export function RegisterPage() {
           .filter((l) => l.menuItemId)
       : [],
   );
-  const [tab, setTab] = useState<PosTab>('all');
+  const [tab, setTab] = useState<string>('all');
   const [selected, setSelected] = useState(0);
   const [mode, setMode] = useState<Mode>('qty');
   const [buffer, setBuffer] = useState('');
   const [busy, setBusy] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [member, setMember] = useState<MemberHit | null>(null);
+  const [memberQuery, setMemberQuery] = useState('');
+  const [memberHits, setMemberHits] = useState<MemberHit[]>([]);
+  const [memberOpen, setMemberOpen] = useState(false);
+  const [facilityItem, setFacilityItem] = useState<MenuItem | null>(null);
+  const [slotDate, setSlotDate] = useState(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
+  const [slots, setSlots] = useState<{ start: string; end: string; free: boolean }[]>([]);
 
   const taxBps = cafe?.taxBps ?? 500;
   const quote = useMemo(() => {
     try {
-      return priceCart({ lines, items, groups: addonGroups, taxBps, discount: 0 });
+      const base = priceCart({ lines, items, groups: addonGroups, taxBps, discount: 0 });
+      const discount = member?.membershipStatus === 'ACTIVE'
+        ? Math.round((base.subtotal * member.discountBps) / 10000)
+        : 0;
+      return priceCart({ lines, items, groups: addonGroups, taxBps, discount });
     } catch {
       return null;
     }
-  }, [items, addonGroups, lines, taxBps]);
+  }, [items, addonGroups, lines, taxBps, member]);
+
+  const sportsCategoryIds = useMemo(() => new Set([
+    'cat_facility',
+    'cat_membership',
+    'cat_classes',
+    'cat_coaching',
+    'cat_rentals',
+    'cat_merch',
+    'cat_refreshments',
+    'cat_other_services',
+  ]), []);
 
   const catalog = useMemo(() => {
     return items
-      .filter((item) => item.isAvailable && !isComboProduct(item))
+      .filter((item) => item.isAvailable && !isComboProduct(item) && sportsCategoryIds.has(item.categoryId))
       .map((item) => {
         const cat = categories.find((c) => c.id === item.categoryId);
         const drink = isDrinkCategory(cat?.name ?? '');
         return { item, drink, sort: item.sortOrder ?? 999 };
       })
       .sort((a, b) => a.sort - b.sort);
-  }, [items, categories]);
+  }, [items, categories, sportsCategoryIds]);
 
   const visible = useMemo(() => {
     let rows = catalog;
-    if (tab === 'food') rows = catalog.filter((row) => !row.drink);
-    else if (tab === 'drinks') rows = catalog.filter((row) => row.drink);
+    if (tab !== 'all') rows = catalog.filter((row) => row.item.categoryId === tab);
     if (searchQuery) rows = rows.filter((row) => row.item.name.toLowerCase().includes(searchQuery));
     return rows;
   }, [catalog, tab, searchQuery]);
@@ -137,13 +168,35 @@ export function RegisterPage() {
     return map;
   }, [lines]);
 
-  function selectTab(next: PosTab) {
+  function selectTab(next: string) {
     setTab((prev) => (prev === next && next !== 'all' ? 'all' : next));
   }
+
+  useEffect(() => {
+    if (!memberOpen) return;
+    const handle = window.setTimeout(() => {
+      void api<{ members: MemberHit[] }>(`/api/gym/members?q=${encodeURIComponent(memberQuery)}`)
+        .then((result) => setMemberHits(result.members.slice(0, 8)))
+        .catch(() => setMemberHits([]));
+    }, 200);
+    return () => window.clearTimeout(handle);
+  }, [memberOpen, memberQuery]);
+
+  useEffect(() => {
+    const facilityId = facilityItem?.sheet?.reference;
+    if (!facilityId) return;
+    void api<{ slots: { start: string; end: string; free: boolean }[] }>(`/api/gym/slots?facilityId=${facilityId}&date=${slotDate}`)
+      .then((result) => setSlots(result.slots))
+      .catch(() => setSlots([]));
+  }, [facilityItem, slotDate]);
 
   function addProduct(menuItemId: string) {
     const item = items.find((i) => i.id === menuItemId);
     if (!item || isComboProduct(item)) return;
+    if (item.categoryId === 'cat_facility' && item.sheet?.reference) {
+      setFacilityItem(item);
+      return;
+    }
     setBuffer('');
     setMode('qty');
     setLines((prev) => {
@@ -211,10 +264,11 @@ export function RegisterPage() {
       } else {
         const order = await createOrder({
           tableId: tableId && tables.some((t) => t.id === tableId) ? tableId : null,
-          customerName: 'Guest',
-          customerMobile: '',
+          customerName: member?.name || 'Guest',
+          customerMobile: member?.mobile || '',
           items: lines,
           notes: tableName ? `MODE:dine` : 'MODE:takeout',
+          discount: quote?.discount ?? 0,
         });
         id = order.id;
       }
@@ -285,7 +339,7 @@ export function RegisterPage() {
                   Release table
                 </button>
               ) : (
-                <p>Tap products to start an order</p>
+                <p>Tap a service to start a sale</p>
               )}
             </div>
           ) : (
@@ -357,9 +411,11 @@ export function RegisterPage() {
           ) : null}
 
           <div className="o-cart__tools">
-            <button type="button" className="o-cart__tool">Cust…</button>
+            <button type="button" className="o-cart__tool" onClick={() => setMemberOpen(true)}>
+              {member ? member.memberCode : 'Member'}
+            </button>
             <button type="button" className="o-cart__tool">Note</button>
-            <button type="button" className="o-cart__tool is-on">Din…</button>
+            <button type="button" className="o-cart__tool is-on">Sale</button>
             <button type="button" className="o-cart__tool" aria-label="Transfer">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <path d="M12 3v12M8 7l4-4 4 4M5 14v5a2 2 0 002 2h10a2 2 0 002-2v-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -425,10 +481,7 @@ export function RegisterPage() {
               <span>Send</span>
               <span className="o-cart__send-meta">
                 <span className="o-cart__send-group">
-                  Food <em>{foodCount}</em>
-                </span>
-                <span className="o-cart__send-group">
-                  Drinks <em>{drinkCount}</em>
+                  Services <em>{foodCount + drinkCount}</em>
                 </span>
               </span>
             </button>
@@ -453,20 +506,16 @@ export function RegisterPage() {
 
       <section className="o-products">
         <div className="o-cats">
-          <button
-            type="button"
-            className={`o-cat o-cat--food${tab === 'food' ? ' is-active' : ''}${tab === 'all' ? ' is-shown' : ''}`}
-            onClick={() => selectTab('food')}
-          >
-            Food
-          </button>
-          <button
-            type="button"
-            className={`o-cat o-cat--drinks${tab === 'drinks' ? ' is-active' : ''}${tab === 'all' ? ' is-shown' : ''}`}
-            onClick={() => selectTab('drinks')}
-          >
-            Drinks
-          </button>
+          {categories.filter((category) => sportsCategoryIds.has(category.id)).map((category) => (
+            <button
+              key={category.id}
+              type="button"
+              className={`o-cat${tab === category.id ? ' is-active' : ''}`}
+              onClick={() => selectTab(category.id)}
+            >
+              {category.name}
+            </button>
+          ))}
         </div>
         <div className="o-grid">
           {visible.map(({ item, drink }, index) => (
@@ -532,6 +581,81 @@ export function RegisterPage() {
                   Cancel Order
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {memberOpen ? (
+        <div className="o-modal-backdrop" onClick={() => setMemberOpen(false)} role="presentation">
+          <div className="o-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="o-modal__head">
+              <span>Member</span>
+              <button type="button" className="o-icon-btn" onClick={() => setMemberOpen(false)}>×</button>
+            </div>
+            <div className="o-modal__body">
+              <input value={memberQuery} placeholder="Search member" onChange={(event) => setMemberQuery(event.target.value)} />
+              <button type="button" className="o-btn" onClick={() => { setMember(null); setMemberOpen(false); }}>Walk-in visitor</button>
+              <ul>
+                {memberHits.map((hit) => (
+                  <li key={hit.id}>
+                    <button
+                      type="button"
+                      onClick={() => { setMember(hit); setMemberOpen(false); }}
+                    >
+                      {hit.name} · {hit.memberCode} · {hit.planName || 'No plan'} · {hit.membershipStatus}
+                      {hit.expiresAt ? ` · ${hit.expiresAt.slice(0, 10)}` : ''} · {Math.round(hit.discountBps / 100)}% off
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {facilityItem ? (
+        <div className="o-modal-backdrop" onClick={() => setFacilityItem(null)} role="presentation">
+          <div className="o-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="o-modal__head">
+              <span>{facilityItem.name}</span>
+              <button type="button" className="o-icon-btn" onClick={() => setFacilityItem(null)}>×</button>
+            </div>
+            <div className="o-modal__body">
+              <p>This reserves a real time slot. It is not only a product line.</p>
+              <input type="date" value={slotDate} onChange={(event) => setSlotDate(event.target.value)} />
+              <ul>
+                {slots.map((slot) => (
+                  <li key={slot.start}>
+                    {new Date(slot.start).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}
+                    {slot.free ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void api('/api/gym/bookings', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                              facilityId: facilityItem.sheet?.reference,
+                              customerId: member?.id,
+                              memberName: member?.name || 'Walk-in',
+                              memberMobile: member?.mobile || '',
+                              startAt: slot.start,
+                              payNow: false,
+                            }),
+                          }).then(() => {
+                            pushToast('Slot reserved. Take payment from Bookings if it is still unpaid.');
+                            setFacilityItem(null);
+                          }).catch((err: unknown) => {
+                            pushToast(err instanceof Error ? err.message : 'Could not reserve that slot.', 'err');
+                          });
+                        }}
+                      >
+                        Reserve
+                      </button>
+                    ) : ' Taken'}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         </div>

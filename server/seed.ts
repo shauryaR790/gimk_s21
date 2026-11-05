@@ -252,7 +252,7 @@ function ensureTables(now: string) {
 export async function seed() {
   const now = new Date().toISOString();
   if (get('SELECT id FROM cafes WHERE id = ?', [CAFE_ID])) {
-    run(`UPDATE cafes SET name = 'After Dunes' WHERE id = ? AND name = 'Habsos'`, [CAFE_ID]);
+    run(`UPDATE cafes SET name = 'Gymkhana' WHERE id = ?`, [CAFE_ID]);
     syncSizes();
     syncMenu(now);
     ensureTables(now);
@@ -262,9 +262,11 @@ export async function seed() {
     ensureInventorySeed();
     ensureBasicIngredients();
     purgeBlockedCustomers();
+    const { seedGymkhana } = await import('./gymkhana');
+    seedGymkhana();
     return;
   }
-  run('INSERT INTO cafes (id, name, tax_bps, currency, timezone, created_at) VALUES (?, ?, 500, ?, ?, ?)', [CAFE_ID, 'After Dunes', 'INR', 'Asia/Kolkata', now]);
+  run('INSERT INTO cafes (id, name, tax_bps, currency, timezone, created_at) VALUES (?, ?, 500, ?, ?, ?)', [CAFE_ID, 'Gymkhana', 'INR', 'Asia/Kolkata', now]);
   run('INSERT INTO order_counters (cafe_id, next_number) VALUES (?, 101)', [CAFE_ID]);
   const password = await hashPassword(env.adminPassword);
   run('INSERT INTO users (id, cafe_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [
@@ -343,6 +345,8 @@ export async function seed() {
   ensureInventorySeed();
   ensureBasicIngredients();
   purgeBlockedCustomers();
+  const { seedGymkhana } = await import('./gymkhana');
+  seedGymkhana();
 }
 
 function insertAddon(id: string, groupId: string, name: string, price: number, sortOrder: number) {

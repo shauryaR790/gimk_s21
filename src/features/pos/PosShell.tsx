@@ -3,22 +3,39 @@ import { PosProvider } from './PosContext';
 import { OdooBackendLayout } from './odoo/OdooBackendLayout';
 import { OdooFoHLayout } from './odoo/OdooFoHLayout';
 import { DashboardPage } from './odoo/DashboardPage';
-import { TablesFloorPage } from './odoo/TablesFloorPage';
 import { RegisterPage } from './odoo/RegisterPage';
 import { PaymentPage } from './odoo/PaymentPage';
-import { OrdersSplitPage } from './odoo/OrdersSplitPage';
 import { ProductsKanbanPage } from './odoo/ProductsKanbanPage';
 import { ProductFormPage } from './odoo/ProductFormPage';
 import { ReportingPage } from './odoo/ReportingPage';
 import { BackendInventoryPage } from './odoo/BackendInventoryPage';
 import { ConfigPage } from './odoo/ConfigPage';
-import { BackendOrdersPage } from './odoo/BackendOrdersPage';
-import { BackendSessionsPage } from './odoo/BackendSessionsPage';
 import { BackendPlaceholderPage } from './odoo/BackendPlaceholderPage';
-import { PreparationDisplayPage } from './odoo/PreparationDisplayPage';
-import { PrepScreenPage, OrderStatusScreenPage } from './odoo/PrepScreenPage';
 import { CustomerDisplayPage } from './odoo/CustomerDisplayPage';
-import { CustomersPage } from './CustomersPage';
+import {
+  BookingsPage,
+  CheckInPage,
+  ClassesPage,
+  EmployeesPage,
+  FacilitiesPage,
+  MaintenancePage,
+  MembersPage,
+  ShiftPage,
+  MembershipsPage,
+  NotificationsPage,
+  SessionsPage,
+} from './gym/centre';
+import {
+  BookingRecordPage,
+  FacilityRecordPage,
+  InventoryRecordPage,
+  MaintenanceRecordPage,
+  ParticipantRecordPage,
+  PlanRecordPage,
+  ShiftRecordPage,
+  TrainerRecordPage,
+  VisitorRecordPage,
+} from './gym/forms';
 import { SettingsPage } from './SettingsPage';
 import { MenuAdminPage } from './MenuAdminPage';
 
@@ -32,44 +49,75 @@ export default function PosShell() {
     <PosProvider>
       <Routes>
         <Route element={<OdooBackendLayout />}>
-          <Route index element={<DashboardPage />} />
-          <Route path="backend/orders" element={<BackendOrdersPage />} />
-          <Route path="backend/sessions" element={<BackendSessionsPage />} />
+          <Route index element={<ReportingPage />} />
+          <Route path="backend/overview" element={<DashboardPage />} />
+          <Route path="backend/orders" element={<Navigate to="/pos/backend/bookings" replace />} />
+          <Route path="backend/sessions" element={<SessionsPage />} />
           <Route path="backend/payments" element={<BackendPlaceholderPage title="Payments" />} />
-          <Route path="backend/preparation" element={<PreparationDisplayPage />} />
-          <Route path="backend/customers" element={<CustomersPage />} />
+          <Route path="backend/preparation" element={<Navigate to="/pos/backend/classes" replace />} />
+          <Route path="backend/customers" element={<Navigate to="/pos/backend/members" replace />} />
+          <Route path="backend/members" element={<Navigate to="/pos/backend/visitors" replace />} />
+          <Route path="backend/visitors/new" element={<VisitorRecordPage />} />
+          <Route path="backend/visitors/:id" element={<VisitorRecordPage />} />
+          <Route path="backend/visitors" element={<MembersPage />} />
+          <Route path="backend/shift/new" element={<ShiftRecordPage />} />
+          <Route path="backend/shift/:id" element={<ShiftRecordPage />} />
+          <Route path="backend/shift" element={<ShiftPage />} />
+          <Route path="backend/memberships" element={<MembershipsPage />} />
+          <Route path="backend/plans/new" element={<PlanRecordPage />} />
+          <Route path="backend/plans/:id" element={<PlanRecordPage />} />
+          <Route path="backend/trainers/new" element={<TrainerRecordPage />} />
+          <Route path="backend/trainers/:id" element={<TrainerRecordPage />} />
+          <Route path="backend/trainers" element={<Navigate to="/pos/backend/classes" replace />} />
+          <Route path="backend/facilities/new" element={<FacilityRecordPage />} />
+          <Route path="backend/facilities/:id" element={<FacilityRecordPage />} />
+          <Route path="backend/facilities" element={<FacilitiesPage />} />
+          <Route path="backend/bookings/new" element={<BookingRecordPage />} />
+          <Route path="backend/bookings/:id" element={<BookingRecordPage />} />
+          <Route path="backend/bookings" element={<BookingsPage />} />
+          <Route path="backend/check-in" element={<CheckInPage />} />
+          <Route path="backend/classes" element={<ClassesPage />} />
+          <Route path="backend/participants/new" element={<ParticipantRecordPage />} />
+          <Route path="backend/rentals" element={<Navigate to="/pos/backend/inventory" replace />} />
+          <Route path="backend/employees" element={<EmployeesPage />} />
+          <Route path="backend/maintenance/new" element={<MaintenanceRecordPage />} />
+          <Route path="backend/maintenance/:id" element={<MaintenanceRecordPage />} />
+          <Route path="backend/maintenance" element={<MaintenancePage />} />
+          <Route path="backend/notifications" element={<NotificationsPage />} />
           <Route path="backend/products" element={<ProductsKanbanPage />} />
+          <Route path="backend/inventory/new" element={<InventoryRecordPage />} />
+          <Route path="backend/inventory/:id" element={<InventoryRecordPage />} />
           <Route path="backend/inventory" element={<BackendInventoryPage />} />
           <Route path="backend/products/:id" element={<ProductFormPage />} />
-          <Route path="backend/reporting" element={<ReportingPage />} />
+          <Route path="backend/reporting" element={<Navigate to="/pos" replace />} />
           <Route path="backend/config" element={<ConfigPage />} />
-          <Route path="customers" element={<Navigate to="/pos/backend/customers" replace />} />
+          <Route path="customers" element={<Navigate to="/pos/backend/members" replace />} />
           <Route path="inventory" element={<BackendInventoryPage />} />
           <Route path="menu" element={<MenuAdminPage />} />
           <Route path="settings" element={<SettingsPage />} />
-          <Route path="reports" element={<Navigate to="/pos/backend/reporting" replace />} />
+          <Route path="reports" element={<Navigate to="/pos" replace />} />
           <Route path="payments" element={<Navigate to="/pos/backend/payments" replace />} />
         </Route>
 
-        <Route path="prep" element={<PrepScreenPage />} />
-        <Route path="prep/status" element={<OrderStatusScreenPage />} />
+        <Route path="prep" element={<Navigate to="/pos/backend/classes" replace />} />
+        <Route path="prep/status" element={<Navigate to="/pos/backend/classes" replace />} />
 
         <Route path="app" element={<OdooFoHLayout />}>
-          <Route index element={<Navigate to="tables" replace />} />
-          <Route path="tables" element={<TablesFloorPage />} />
+          <Route index element={<Navigate to="register" replace />} />
+          <Route path="tables" element={<Navigate to="/pos/backend/facilities" replace />} />
           <Route path="register" element={<RegisterPage />} />
           <Route path="payment" element={<PaymentPage />} />
-          <Route path="orders" element={<OrdersSplitPage />} />
+          <Route path="orders" element={<Navigate to="/pos/backend/bookings" replace />} />
           <Route path="customer-display" element={<CustomerDisplayPage />} />
         </Route>
 
         {/* Legacy paths → Odoo FoH */}
-        <Route path="app/floors/edit" element={<Navigate to="/pos/app/tables" replace />} />
+        <Route path="app/floors/edit" element={<Navigate to="/pos/backend/facilities" replace />} />
 
-        <Route path="tables" element={<Navigate to="/pos/app/tables" replace />} />
+        <Route path="tables" element={<Navigate to="/pos/backend/facilities" replace />} />
         <Route path="orders/new" element={<RedirectRegister />} />
-        <Route path="orders" element={<Navigate to="/pos/app/orders" replace />} />
-        <Route path="orders/:id" element={<Navigate to="/pos/app/orders" replace />} />
+        <Route path="orders" element={<Navigate to="/pos/backend/bookings" replace />} />
+        <Route path="orders/:id" element={<Navigate to="/pos/backend/bookings" replace />} />
       </Routes>
     </PosProvider>
   );
