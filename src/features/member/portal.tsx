@@ -168,7 +168,7 @@ export function MemberPlansPage() {
           </li>
         ))}
       </ul>
-      <p>Buy or renew at reception. The desk records cash, UPI, or card against a real bill. This page does not mark a plan paid by itself.</p>
+      <p><Link to="/join">Buy a membership online</Link>: pick your sport, add your details, choose a plan and pay. You can also buy or renew at reception.</p>
     </Frame>
   );
 }

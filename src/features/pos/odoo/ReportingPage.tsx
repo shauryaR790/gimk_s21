@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { formatOdooINR, OPEN_STATUSES, type SalesReport, type SalesTicket } from '../../../../shared/domain';
+import { formatOdooINR, type SalesReport, type SalesTicket } from '../../../../shared/domain';
 import { api } from '../../../lib/api';
 import { downloadExcel } from '../../../lib/excel';
 import { useTitle } from '../../../lib/useTitle';
 import { usePos } from '../PosContext';
 import type { BackendChromeContext } from './OdooBackendLayout';
+import { ChromeRecords } from './chrome';
 import { Dropdown } from '../gym/record';
 
 type Range = 'today' | '7' | '30';
-type Focus = 'all' | 'open' | 'paid' | 'due' | 'cancelled';
 
-const COLORS = ['#3949ab', '#5c6bc0', '#26a69a', '#ef6c00', '#c62828', '#6d4c41', '#00838f', '#7b1fa2'];
+const COLORS = ['#8ec8f0', '#9b7dff'];
 const CLUB_CATEGORIES = new Set([
   'cat_facility',
   'cat_membership',
@@ -71,9 +71,8 @@ function changeLabel(current: number, previous: number) {
 export function ReportingPage() {
   useTitle('Dashboard');
   const pos = usePos();
-  const { search, setPagerLabel } = useOutletContext<BackendChromeContext>();
+  const { search } = useOutletContext<BackendChromeContext>();
   const [range, setRange] = useState<Range>('today');
-  const [focus, setFocus] = useState<Focus>('all');
   const [report, setReport] = useState<SalesReport | null>(null);
   const [previousTickets, setPreviousTickets] = useState<SalesTicket[]>([]);
   const [error, setError] = useState('');
@@ -122,7 +121,6 @@ export function ReportingPage() {
       if (!detail) return;
       if (detail.type === 'range' && detail.range) {
         setRange(detail.range);
-        setFocus('all');
       }
       if (detail.type === 'print') window.print();
       if (detail.type === 'export') exportExcel();
@@ -165,33 +163,15 @@ export function ReportingPage() {
     }));
   }, [report]);
 
-  const counts = useMemo(() => {
-    const tickets = clubTickets;
-    return {
-      open: tickets.filter((ticket) => !ticket.cancelled && OPEN_STATUSES.includes(ticket.status)).length,
-      paid: tickets.filter((ticket) => !ticket.cancelled && ticket.paymentStatus === 'PAID').length,
-      due: tickets.filter((ticket) => !ticket.cancelled && ticket.due > 0).length,
-      cancelled: tickets.filter((ticket) => ticket.cancelled).length,
-    };
-  }, [clubTickets]);
-
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return clubTickets.filter((ticket) => {
-      if (focus === 'open' && (ticket.cancelled || !OPEN_STATUSES.includes(ticket.status))) return false;
-      if (focus === 'paid' && (ticket.cancelled || ticket.paymentStatus !== 'PAID')) return false;
-      if (focus === 'due' && (ticket.cancelled || ticket.due <= 0)) return false;
-      if (focus === 'cancelled' && !ticket.cancelled) return false;
       if (!needle) return true;
       const hay = `${ticket.orderNumber} ${ticket.customerName} ${ticket.tableName ?? ''} ${ticket.items.map((item) => item.name).join(' ')}`.toLowerCase();
       return hay.includes(needle);
     });
-  }, [clubTickets, focus, search]);
+  }, [clubTickets, search]);
 
-  useEffect(() => {
-    const shown = Math.min(rows.length, 20);
-    setPagerLabel(rows.length ? `1-${shown} / ${rows.length}` : '0-0 / 0');
-  }, [rows.length, setPagerLabel]);
 
   function exportExcel() {
     downloadExcel(`after-dunes-report-${range}`, [
@@ -247,7 +227,7 @@ export function ReportingPage() {
   const average = liveBills.length ? Math.round(clubNet / liveBills.length) : 0;
 
   return (
-    <div className="o-track">
+    <div className="o-track gk-dash">
       <header className="o-track__hello">
         <h2>Hello, {first}</h2>
         <Dropdown
@@ -258,10 +238,7 @@ export function ReportingPage() {
             { value: '7', label: 'Last 7 days' },
             { value: '30', label: 'Last 30 days' },
           ]}
-          onChange={(value) => {
-            setRange(value as Range);
-            setFocus('all');
-          }}
+          onChange={(value) => setRange(value as Range)}
         />
       </header>
 
@@ -269,21 +246,25 @@ export function ReportingPage() {
 
       <section className="o-track__kpis o-track__kpis--four">
         <article>
+          <img className="gk-kpi-icon" src="/ui/kpi-sales.png" alt="" />
           <span>Net sales</span>
           <strong>{report ? formatOdooINR(clubNet) : '—'}</strong>
           <em>{changeLabel(clubNet, previousNet)}</em>
         </article>
         <article>
+          <img className="gk-kpi-icon" src="/ui/kpi-bills.png" alt="" />
           <span>Sales bills</span>
           <strong>{report ? liveBills.length : '—'}</strong>
           <em>{clubTickets.filter((ticket) => ticket.cancelled).length} cancelled</em>
         </article>
         <article>
+          <img className="gk-kpi-icon" src="/ui/kpi-members.png" alt="" />
           <span>Members and guests</span>
           <strong>{new Set(liveBills.map((ticket) => ticket.customerName.trim() || 'Walk-in')).size}</strong>
           <em>{gym?.visitors ?? 0} people on file</em>
         </article>
         <article>
+          <img className="gk-kpi-icon" src="/ui/kpi-ticket.png" alt="" />
           <span>Average ticket</span>
           <strong>{report ? formatOdooINR(average) : '—'}</strong>
           <em>{report ? formatOdooINR(collected) : '—'} collected</em>
@@ -323,13 +304,6 @@ export function ReportingPage() {
         </section>
       </div>
 
-      <section className="o-track__status">
-        <StatusCard label="Open bills" count={counts.open} hint="Not yet paid" active={focus === 'open'} tone="blue" onClick={() => setFocus(focus === 'open' ? 'all' : 'open')} />
-        <StatusCard label="Paid" count={counts.paid} hint="Payment received" active={focus === 'paid'} tone="green" onClick={() => setFocus(focus === 'paid' ? 'all' : 'paid')} />
-        <StatusCard label="Still due" count={counts.due} hint="Balance left" active={focus === 'due'} tone="amber" onClick={() => setFocus(focus === 'due' ? 'all' : 'due')} />
-        <StatusCard label="Cancelled" count={counts.cancelled} hint="Not in net sales" active={focus === 'cancelled'} tone="red" onClick={() => setFocus(focus === 'cancelled' ? 'all' : 'cancelled')} />
-      </section>
-
       {gym ? (
         <section className="o-track__status">
           <article className="o-track__stat o-track__stat--plain"><span>Active visitors</span><strong>{gym.activeVisitors}</strong><em>Inside right now</em></article>
@@ -340,44 +314,34 @@ export function ReportingPage() {
       ) : null}
 
       <section className="o-track__card">
-        <h3>Sales {focus === 'all' ? '' : `· ${focus}`}</h3>
-        <table className="o-track__table o-track__table--wide">
-          <thead>
-            <tr><th>Bill</th><th>Customer</th><th>Where</th><th>Items</th><th>Payment</th><th>Status</th><th>Total</th></tr>
-          </thead>
-          <tbody>
-            {rows.slice(0, 20).map((ticket) => (
-              <OrderRow key={ticket.id} ticket={ticket} />
-            ))}
-            {!rows.length ? <tr><td colSpan={7}>{search.trim() ? 'Nothing matches that search.' : 'No sales in this period.'}</td></tr> : null}
-          </tbody>
-        </table>
+        <h3>Sales</h3>
+        <ChromeRecords
+          items={rows.map((ticket) => ({
+            id: ticket.id,
+            title: `#${ticket.orderNumber || '—'} ${ticket.customerName || 'Walk-in'}`,
+            subtitle: ticket.items.map((item) => `${item.qty}× ${item.name}`).join(', ') || 'Desk',
+            meta: formatOdooINR(ticket.total),
+            when: ticket.createdAt,
+          }))}
+          empty={search.trim() ? 'Nothing matches that search.' : 'No sales in this period.'}
+        >
+          {(page) => (
+            <table className="o-track__table o-track__table--wide">
+              <thead>
+                <tr><th>Bill</th><th>Customer</th><th>Where</th><th>Items</th><th>Payment</th><th>Status</th><th>Total</th></tr>
+              </thead>
+              <tbody>
+                {page.map((item) => {
+                  const ticket = rows.find((row) => row.id === item.id);
+                  return ticket ? <OrderRow key={ticket.id} ticket={ticket} /> : null;
+                })}
+                {!rows.length ? <tr><td colSpan={7}>{search.trim() ? 'Nothing matches that search.' : 'No sales in this period.'}</td></tr> : null}
+              </tbody>
+            </table>
+          )}
+        </ChromeRecords>
       </section>
     </div>
-  );
-}
-
-function StatusCard({
-  label,
-  count,
-  hint,
-  active,
-  tone,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  hint: string;
-  active: boolean;
-  tone: 'blue' | 'green' | 'amber' | 'red';
-  onClick: () => void;
-}) {
-  return (
-    <button type="button" className={`o-track__stat is-${tone}${active ? ' is-on' : ''}`} onClick={onClick}>
-      <span>{label}</span>
-      <strong>{count}</strong>
-      <em>{hint}</em>
-    </button>
   );
 }
 

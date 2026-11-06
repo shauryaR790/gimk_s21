@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
-import { useNavigate, useOutletContext } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { formatINR } from '../../../../shared/domain';
+import { priorityLabel } from '../../../../shared/maintenance';
 import { api } from '../../../lib/api';
 import { useTitle } from '../../../lib/useTitle';
 import { pushToast } from '../../../components/Toast';
-import type { BackendChromeContext } from '../odoo/OdooBackendLayout';
-import { BOOKING_STATUS, Dropdown, describeAction, whenText } from './record';
+import { ChromeRecords, type BoardItem } from '../odoo/chrome';
+import { BOOKING_STAGES, BOOKING_STATUS, BookingStages, bookingStageClass, Dropdown, describeAction, whenText } from './record';
+import { JOIN_STATUS, joinPayment, type JoinRequest } from './forms';
 
 type Member = {
   id: string;
@@ -37,6 +39,13 @@ type Facility = {
   visitorCount?: number;
   using?: { name: string; member: boolean; coach: string }[];
 };
+
+function facilityStage(facility: Facility) {
+  const open = facility.isAvailable && facility.maintenanceStatus === 'OK';
+  if (!open) return { label: 'Closed', className: 'gk-pill is-closed' };
+  if ((facility.visitorCount ?? 0) >= facility.capacity) return { label: 'Fully occupied', className: 'gk-pill is-full' };
+  return { label: 'Active', className: 'gk-pill is-active' };
+}
 
 type Plan = {
   id: string;
@@ -86,16 +95,17 @@ function useLoad<T>(path: string) {
 
 function Shell({ title, children, error }: { title: string; children: ReactNode; error?: string }) {
   useTitle(title);
-  const { setPagerLabel } = useOutletContext<BackendChromeContext>();
-  useEffect(() => {
-    setPagerLabel('');
-  }, [setPagerLabel]);
   return (
     <section className="o-track">
       {error ? <p className="o-track__error">{error}</p> : null}
       {children}
     </section>
   );
+}
+
+function take<T extends { id: string }>(rows: T[], page: BoardItem[]) {
+  const map = new Map(rows.map((row) => [row.id, row]));
+  return page.map((item) => map.get(item.id)).filter((row): row is T => Boolean(row));
 }
 
 function Head({ title, children }: { title: string; children?: ReactNode }) {
@@ -109,6 +119,13 @@ function Head({ title, children }: { title: string; children?: ReactNode }) {
 
 function when(iso: string) {
   return new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' });
+}
+
+function dayLabel(ymd: string, today: string) {
+  if (ymd === today) return 'Today';
+  const noon = Date.parse(`${ymd}T12:00:00+05:30`);
+  if (Date.parse(`${today}T12:00:00+05:30`) - noon === 86_400_000) return 'Yesterday';
+  return new Date(noon).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 function clock(iso: string) {
@@ -164,22 +181,35 @@ export function MembersPage() {
           ]}
         />
       </div>
-      <table className="o-be-table gk-table">
-        <thead><tr><th>Name</th><th>Phone</th><th>Wants to use</th><th>Status</th><th>Trainer</th><th>Government ID</th></tr></thead>
-        <tbody>
-          {members.map((member) => (
-            <tr key={member.id} className="is-link" onClick={() => navigate(`/pos/backend/visitors/${member.id}`)}>
-              <td><strong>{member.name}</strong><div className="gk-muted">{member.memberCode}</div></td>
-              <td>{member.mobile}</td>
-              <td>{member.accessInterest || '—'}</td>
-              <td>{member.isMember ? member.planName || 'Member' : 'Visitor'}</td>
-              <td>{member.coachName || '—'}</td>
-              <td>{member.govtIdLabel || '—'}</td>
-            </tr>
-          ))}
-          {!members.length ? <tr><td colSpan={6} className="o-be-table__empty">No visitors yet — add one from this page</td></tr> : null}
-        </tbody>
-      </table>
+      <ChromeRecords
+        items={members.map((member) => ({
+          id: member.id,
+          title: member.name,
+          subtitle: member.mobile,
+          meta: member.coachName || member.planName || (member.isMember ? 'Member' : 'Visitor'),
+          href: `/pos/backend/visitors/${member.id}`,
+        }))}
+        empty="No visitors yet — add one from this page"
+      >
+        {(page) => (
+          <table className="o-be-table gk-table">
+            <thead><tr><th>Name</th><th>Phone</th><th>Wants to use</th><th>Status</th><th>Trainer</th><th>Government ID</th></tr></thead>
+            <tbody>
+              {take(members, page).map((member) => (
+                <tr key={member.id} className="is-link" onClick={() => navigate(`/pos/backend/visitors/${member.id}`)}>
+                  <td><strong>{member.name}</strong><div className="gk-muted">{member.memberCode}</div></td>
+                  <td>{member.mobile}</td>
+                  <td>{member.accessInterest || '—'}</td>
+                  <td>{member.isMember ? member.planName || 'Member' : 'Visitor'}</td>
+                  <td>{member.coachName || '—'}</td>
+                  <td>{member.govtIdLabel || '—'}</td>
+                </tr>
+              ))}
+              {!members.length ? <tr><td colSpan={6} className="o-be-table__empty">No visitors yet — add one from this page</td></tr> : null}
+            </tbody>
+          </table>
+        )}
+      </ChromeRecords>
     </Shell>
   );
 }
@@ -193,42 +223,58 @@ export function FacilitiesPage() {
       <Head title="Facilities">
         <button type="button" className="gk-btn" onClick={() => navigate('/pos/backend/facilities/new')}>Add facility</button>
       </Head>
-      <table className="o-be-table gk-table">
-        <thead>
-          <tr><th>Facility</th><th>Sport</th><th>Using now</th><th>Trainer with them</th><th>Capacity</th><th>Hours</th><th>Member</th><th>Guest</th><th>Status</th><th /></tr>
-        </thead>
-        <tbody>
-          {facilities.map((facility) => {
-            const open = facility.isAvailable && facility.maintenanceStatus === 'OK';
-            return (
-              <tr key={facility.id} className="is-link" onClick={() => navigate(`/pos/backend/facilities/${facility.id}`)}>
-                <td><strong>{facility.name}</strong><div className="gk-muted">{facility.location}</div></td>
-                <td>{facility.sport}</td>
-                <td>{facility.visitorCount ?? 0}{(facility.using ?? []).map((person) => <div key={person.name} className="gk-muted">{person.name} · {person.member ? 'Member' : 'Visitor'}</div>)}</td>
-                <td>{(facility.using ?? []).map((person) => person.coach).filter(Boolean).join(', ') || '—'}</td>
-                <td>{facility.capacity}</td>
-                <td>{facility.opensAt}–{facility.closesAt}</td>
-                <td>{formatINR(facility.memberPrice)}</td>
-                <td>{formatINR(facility.guestPrice)}</td>
-                <td>{open ? 'Open' : 'Blocked'}</td>
-                <td className="gk-actions" onClick={stop}>
-                  {open ? <button type="button" className="gk-btn gk-btn--sm" onClick={() => navigate(`/pos/backend/bookings/new?facility=${facility.id}`)}>Book</button> : null}
-                  {open ? (
-                    <button
-                      type="button"
-                      className="gk-btn gk-btn--sm"
-                      onClick={() => void act(() => api(`/api/gym/facilities/${facility.id}/maintenance`, { method: 'POST', body: JSON.stringify({ title: 'Blocked', block: true }) }), `${facility.name} blocked`, reload)}
-                    >
-                      Block
-                    </button>
-                  ) : null}
-                </td>
-              </tr>
-            );
-          })}
-          {!facilities.length ? <tr><td colSpan={10} className="o-be-table__empty">No facilities yet — add one from this page</td></tr> : null}
-        </tbody>
-      </table>
+      <ChromeRecords
+        items={facilities.map((facility) => ({
+          id: facility.id,
+          title: facility.name,
+          subtitle: facility.sport,
+          meta: facility.isAvailable && facility.maintenanceStatus === 'OK' ? 'Open' : 'Blocked',
+          href: `/pos/backend/facilities/${facility.id}`,
+        }))}
+        empty="No facilities yet — add one from this page"
+      >
+        {(page) => (
+          <table className="o-be-table gk-table">
+            <thead>
+              <tr><th>Facility</th><th>Timings</th><th>People</th><th>Amount</th><th>Status</th><th /></tr>
+            </thead>
+            <tbody>
+              {take(facilities, page).map((facility) => {
+                const open = facility.isAvailable && facility.maintenanceStatus === 'OK';
+                const stage = facilityStage(facility);
+                const people = facility.using ?? [];
+                return (
+                  <tr key={facility.id} className="is-link" onClick={() => navigate(`/pos/backend/facilities/${facility.id}`)}>
+                    <td><strong>{facility.name}</strong><div className="gk-muted">{facility.location}</div></td>
+                    <td>{facility.opensAt}–{facility.closesAt}</td>
+                    <td>
+                      {facility.visitorCount ?? 0}
+                      {people.map((person) => (
+                        <div key={person.name} className="gk-muted">{person.name} · {person.member ? 'Member' : 'Visitor'}</div>
+                      ))}
+                    </td>
+                    <td>{formatINR(facility.memberPrice)}<div className="gk-muted">{formatINR(facility.guestPrice)} guest</div></td>
+                    <td><span className={stage.className}>{stage.label}</span></td>
+                    <td className="gk-actions" onClick={stop}>
+                      {open ? <button type="button" className="gk-btn gk-btn--sm" onClick={() => navigate(`/pos/backend/bookings/new?facility=${facility.id}`)}>Book</button> : null}
+                      {open ? (
+                        <button
+                          type="button"
+                          className="gk-btn gk-btn--sm"
+                          onClick={() => void act(() => api(`/api/gym/facilities/${facility.id}/maintenance`, { method: 'POST', body: JSON.stringify({ title: 'Blocked', block: true }) }), `${facility.name} blocked`, reload)}
+                        >
+                          Block
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!facilities.length ? <tr><td colSpan={6} className="o-be-table__empty">No facilities yet — add one from this page</td></tr> : null}
+            </tbody>
+          </table>
+        )}
+      </ChromeRecords>
     </Shell>
   );
 }
@@ -239,9 +285,10 @@ export function BookingsPage() {
   const [date, setDate] = useState(today);
   const [facilityId, setFacilityId] = useState('');
   const [view, setView] = useState<'day' | 'week'>('day');
+  const [stage, setStage] = useState('all');
   const facilities = useLoad<{ facilities: Facility[] }>('/api/gym/facilities');
   const path = `/api/gym/bookings?date=${view === 'day' ? date : ''}&facilityId=${facilityId}`;
-  const { data, error, reload } = useLoad<{ bookings: Booking[] }>(path);
+  const { data, error } = useLoad<{ bookings: Booking[] }>(path);
   const rows = useMemo(() => {
     const list = data?.bookings ?? [];
     const byFacility = (left: Booking, right: Booking) => left.facility.localeCompare(right.facility) || left.startAt.localeCompare(right.startAt);
@@ -253,10 +300,11 @@ export function BookingsPage() {
       return t >= start && t < end;
     }).sort(byFacility);
   }, [data, view, date]);
-
-  function status(id: string, next: string) {
-    void act(() => api(`/api/gym/bookings/${id}/status`, { method: 'POST', body: JSON.stringify({ status: next }) }), next === 'CANCELLED' ? 'Booking cancelled' : 'Booking updated', reload);
-  }
+  const shown = useMemo(() => {
+    if (stage === 'all') return rows;
+    if (stage === 'CANCELLED') return rows.filter((row) => row.status === 'CANCELLED' || row.status === 'NO_SHOW');
+    return rows.filter((row) => row.status === stage);
+  }, [rows, stage]);
 
   return (
     <Shell title="Bookings" error={error}>
@@ -272,35 +320,54 @@ export function BookingsPage() {
           onChange={setFacilityId}
           options={[{ value: '', label: 'All facilities' }, ...(facilities.data?.facilities ?? []).map((facility) => ({ value: facility.id, label: facility.name }))]}
         />
+        <div className="gk-stages" role="group" aria-label="Filter by stage">
+          {[{ id: 'all', label: 'All stages' }, ...BOOKING_STAGES].map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              className={`gk-pill${entry.id === 'all' ? '' : ` ${bookingStageClass(entry.id)}`}${stage === entry.id ? ' is-on' : ''}`}
+              aria-pressed={stage === entry.id}
+              onClick={() => setStage(entry.id)}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </div>
       </div>
-      <table className="o-be-table gk-table">
-        <thead>
-          <tr>{['Visitor', 'Facility', 'Start', 'End', 'People', 'Amount', 'Payment', 'Status', ''].map((label) => <th key={label}>{label}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => {
-            const open = row.status === 'CONFIRMED' || row.status === 'CHECKED_IN';
-            return (
-              <tr key={row.id} className="is-link" onClick={() => navigate(`/pos/backend/bookings/${row.id}`)}>
-                <td><strong>{row.memberName}</strong><div className="gk-muted">{row.sport}</div></td>
-                <td>{row.facility}</td>
-                <td>{view === 'day' ? clock(row.startAt) : when(row.startAt)}</td>
-                <td>{clock(row.endAt)}</td>
-                <td>{row.participants}</td>
-                <td>{formatINR(row.amount)}</td>
-                <td>{row.paymentStatus === 'PAID' ? 'Paid' : 'Due'}</td>
-                <td><span className={`gk-pill is-${row.status.toLowerCase()}`}>{BOOKING_STATUS[row.status] ?? row.status}</span></td>
-                <td className="gk-actions" onClick={stop}>
-                  {row.status === 'CONFIRMED' ? <button type="button" className="gk-btn gk-btn--sm" onClick={() => status(row.id, 'CHECKED_IN')}>Check in</button> : null}
-                  {open ? <button type="button" className="gk-btn gk-btn--sm" onClick={() => status(row.id, 'COMPLETED')}>Done</button> : null}
-                  {open ? <button type="button" className="gk-btn gk-btn--sm" onClick={() => status(row.id, 'CANCELLED')}>Cancel</button> : null}
-                </td>
-              </tr>
-            );
-          })}
-          {!rows.length ? <tr><td colSpan={9} className="o-be-table__empty">No bookings yet — create one for this day</td></tr> : null}
-        </tbody>
-      </table>
+      <ChromeRecords
+        items={shown.map((row) => ({
+          id: row.id,
+          title: row.memberName,
+          subtitle: row.facility,
+          meta: BOOKING_STATUS[row.status] ?? row.status,
+          href: `/pos/backend/bookings/${row.id}`,
+          when: row.startAt,
+        }))}
+        empty={rows.length ? 'No bookings in this stage' : 'No bookings yet — create one for this day'}
+      >
+        {(page) => (
+          <table className="o-be-table gk-table">
+            <thead>
+              <tr>{['Visitor', 'Facility', 'Start', 'End', 'People', 'Amount', 'Payment', 'Status'].map((label) => <th key={label}>{label}</th>)}</tr>
+            </thead>
+            <tbody>
+              {take(shown, page).map((row) => (
+                <tr key={row.id} className="is-link" onClick={() => navigate(`/pos/backend/bookings/${row.id}`)}>
+                  <td><strong>{row.memberName}</strong><div className="gk-muted">{row.sport}</div></td>
+                  <td>{row.facility}</td>
+                  <td>{view === 'day' ? clock(row.startAt) : when(row.startAt)}</td>
+                  <td>{clock(row.endAt)}</td>
+                  <td>{row.participants}</td>
+                  <td>{formatINR(row.amount)}</td>
+                  <td>{row.paymentStatus === 'PAID' ? 'Paid' : 'Due'}</td>
+                  <td><BookingStages status={row.status} /></td>
+                </tr>
+              ))}
+              {!shown.length ? <tr><td colSpan={8} className="o-be-table__empty">{rows.length ? 'No bookings in this stage' : 'No bookings yet — create one for this day'}</td></tr> : null}
+            </tbody>
+          </table>
+        )}
+      </ChromeRecords>
     </Shell>
   );
 }
@@ -316,50 +383,75 @@ export function MembershipsPage() {
       <Head title="Memberships">
         <button type="button" className="gk-btn" onClick={() => navigate('/pos/backend/plans/new')}>Create plan</button>
       </Head>
-      <table className="o-be-table gk-table">
-        <thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Status</th><th>Expires</th><th>Trainer</th></tr></thead>
-        <tbody>
-          {members.map((member) => (
-            <tr key={member.id} className="is-link" onClick={() => navigate(`/pos/backend/visitors/${member.id}`)}>
-              <td><strong>{member.name}</strong><div className="gk-muted">{member.memberCode}</div></td>
-              <td>{member.mobile}</td>
-              <td>{member.planName || '—'}</td>
-              <td>{member.membershipStatus}</td>
-              <td>{member.expiresAt ? member.expiresAt.slice(0, 10) : '—'}</td>
-              <td>{member.coachName || '—'}</td>
-            </tr>
-          ))}
-          {!members.length ? <tr><td colSpan={6} className="o-be-table__empty">No paid memberships yet — sell a plan and the member appears here</td></tr> : null}
-        </tbody>
-      </table>
-      <h3 className="gk-section">Plans</h3>
-      <table className="o-be-table gk-table">
-        <thead><tr><th>Plan</th><th>Days</th><th>Price</th><th>Discount</th><th>Guest passes</th><th>Freeze</th><th>Access</th><th>Status</th><th /></tr></thead>
-        <tbody>
-          {plans.map((plan) => (
-            <tr key={plan.id} className="is-link" onClick={() => navigate(`/pos/backend/plans/${plan.id}`)}>
-              <td><strong>{plan.name}</strong><div className="gk-muted">{plan.description || '—'}</div></td>
-              <td>{plan.durationDays}</td>
-              <td>{formatINR(plan.price)}</td>
-              <td>{plan.discountBps / 100}%</td>
-              <td>{plan.guestPasses}</td>
-              <td>{plan.freezeDays} days</td>
-              <td>{plan.facilityAccess === 'ALL' ? 'All facilities' : plan.facilityAccess}</td>
-              <td>{plan.isActive ? 'Active' : 'Off'}</td>
-              <td className="gk-actions" onClick={stop}>
-                <button
-                  type="button"
-                  className="gk-btn gk-btn--sm"
-                  onClick={() => void act(() => api(`/api/gym/plans/${plan.id}`, { method: 'PATCH', body: JSON.stringify({ ...plan, isActive: !plan.isActive }) }), plan.isActive ? 'Plan turned off' : 'Plan turned on', reload)}
-                >
-                  {plan.isActive ? 'Turn off' : 'Turn on'}
-                </button>
-              </td>
-            </tr>
-          ))}
-          {!plans.length ? <tr><td colSpan={9} className="o-be-table__empty">No plans yet — create one from this page</td></tr> : null}
-        </tbody>
-      </table>
+      <ChromeRecords
+        items={[
+          ...members.map((member) => ({
+            id: member.id,
+            title: member.name,
+            subtitle: member.planName || member.membershipStatus,
+            meta: member.coachName || member.mobile,
+            href: `/pos/backend/visitors/${member.id}`,
+            when: member.expiresAt ?? undefined,
+          })),
+          ...plans.map((plan) => ({
+            id: plan.id,
+            title: plan.name,
+            subtitle: `${plan.durationDays} days`,
+            meta: plan.isActive ? 'Active plan' : 'Off',
+            href: `/pos/backend/plans/${plan.id}`,
+          })),
+        ]}
+        empty="No paid memberships yet — sell a plan and the member appears here"
+      >
+        {(page) => (
+          <>
+            <table className="o-be-table gk-table">
+              <thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Status</th><th>Expires</th><th>Trainer</th></tr></thead>
+              <tbody>
+                {take(members, page).map((member) => (
+                  <tr key={member.id} className="is-link" onClick={() => navigate(`/pos/backend/visitors/${member.id}`)}>
+                    <td><strong>{member.name}</strong><div className="gk-muted">{member.memberCode}</div></td>
+                    <td>{member.mobile}</td>
+                    <td>{member.planName || '—'}</td>
+                    <td>{member.membershipStatus}</td>
+                    <td>{member.expiresAt ? member.expiresAt.slice(0, 10) : '—'}</td>
+                    <td>{member.coachName || '—'}</td>
+                  </tr>
+                ))}
+                {!members.length ? <tr><td colSpan={6} className="o-be-table__empty">No paid memberships yet — sell a plan and the member appears here</td></tr> : null}
+              </tbody>
+            </table>
+            <h3 className="gk-section">Plans</h3>
+            <table className="o-be-table gk-table">
+              <thead><tr><th>Plan</th><th>Days</th><th>Price</th><th>Discount</th><th>Guest passes</th><th>Freeze</th><th>Access</th><th>Status</th><th /></tr></thead>
+              <tbody>
+                {take(plans, page).map((plan) => (
+                  <tr key={plan.id} className="is-link" onClick={() => navigate(`/pos/backend/plans/${plan.id}`)}>
+                    <td><strong>{plan.name}</strong><div className="gk-muted">{plan.description || '—'}</div></td>
+                    <td>{plan.durationDays}</td>
+                    <td>{formatINR(plan.price)}</td>
+                    <td>{plan.discountBps / 100}%</td>
+                    <td>{plan.guestPasses}</td>
+                    <td>{plan.freezeDays} days</td>
+                    <td>{plan.facilityAccess === 'ALL' ? 'All facilities' : plan.facilityAccess}</td>
+                    <td>{plan.isActive ? 'Active' : 'Off'}</td>
+                    <td className="gk-actions" onClick={stop}>
+                      <button
+                        type="button"
+                        className="gk-btn gk-btn--sm"
+                        onClick={() => void act(() => api(`/api/gym/plans/${plan.id}`, { method: 'PATCH', body: JSON.stringify({ ...plan, isActive: !plan.isActive }) }), plan.isActive ? 'Plan turned off' : 'Plan turned on', reload)}
+                      >
+                        {plan.isActive ? 'Turn off' : 'Turn on'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {!plans.length ? <tr><td colSpan={9} className="o-be-table__empty">No plans yet — create one from this page</td></tr> : null}
+              </tbody>
+            </table>
+          </>
+        )}
+      </ChromeRecords>
     </Shell>
   );
 }
@@ -415,30 +507,43 @@ export function CheckInPage() {
           </div>
         </article>
       ) : null}
-      <table className="o-be-table gk-table">
-        <thead><tr><th>Person</th><th>Place</th><th>Kind</th><th>In</th><th /></tr></thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <td><strong>{row.member_name}</strong></td>
-              <td>{row.facility_name}</td>
-              <td>{row.kind} · {row.payment_status}</td>
-              <td>{when(row.checked_in_at)}</td>
-              <td className="gk-actions">
-                {row.checked_out_at ? `Out ${clock(row.checked_out_at)}` : <button type="button" className="gk-btn gk-btn--sm" onClick={() => void act(() => api(`/api/gym/checkins/${row.id}/out`, { method: 'POST', body: '{}' }), 'Checked out', reload)}>Check out</button>}
-              </td>
-            </tr>
-          ))}
-          {!rows.length ? <tr><td colSpan={5} className="o-be-table__empty">No one is checked in — find a visitor above</td></tr> : null}
-        </tbody>
-      </table>
+      <ChromeRecords
+        items={rows.map((row) => ({
+          id: row.id,
+          title: row.member_name,
+          subtitle: row.facility_name,
+          meta: row.kind,
+          when: row.checked_in_at,
+        }))}
+        empty="No one is checked in — find a visitor above"
+      >
+        {(page) => (
+          <table className="o-be-table gk-table">
+            <thead><tr><th>Person</th><th>Place</th><th>Kind</th><th>In</th><th /></tr></thead>
+            <tbody>
+              {take(rows, page).map((row) => (
+                <tr key={row.id}>
+                  <td><strong>{row.member_name}</strong></td>
+                  <td>{row.facility_name}</td>
+                  <td>{row.kind} · {row.payment_status}</td>
+                  <td>{when(row.checked_in_at)}</td>
+                  <td className="gk-actions">
+                    {row.checked_out_at ? `Out ${clock(row.checked_out_at)}` : <button type="button" className="gk-btn gk-btn--sm" onClick={() => void act(() => api(`/api/gym/checkins/${row.id}/out`, { method: 'POST', body: '{}' }), 'Checked out', reload)}>Check out</button>}
+                  </td>
+                </tr>
+              ))}
+              {!rows.length ? <tr><td colSpan={5} className="o-be-table__empty">No one is checked in — find a visitor above</td></tr> : null}
+            </tbody>
+          </table>
+        )}
+      </ChromeRecords>
     </Shell>
   );
 }
 
 type ClassRow = { id: string; name: string; category: string; trainer_name: string | null; trainer_phone: string | null; trainer_email: string | null; schedule: string; duration_minutes: number; capacity: number; price: number; description: string; is_private: number };
 type TrainerRow = { id: string; name: string; phone: string; email?: string; specialization: string; availability: string; isActive?: boolean };
-type Registration = { id: string; class_id: string; class_name?: string; name: string; status: string; attended: number };
+type Registration = { id: string; class_id: string; class_name?: string; class_schedule?: string; trainer_name?: string | null; trainer_phone?: string | null; name: string; status: string; attended: number };
 
 export function ClassesPage() {
   const navigate = useNavigate();
@@ -473,62 +578,76 @@ export function ClassesPage() {
         />
         <button type="submit" className="gk-btn">Create</button>
       </form>
-      <table className="o-be-table gk-table">
-        <thead><tr><th>Class</th><th>Trainer</th><th>Contact</th><th>Schedule</th><th>Places</th><th>Price</th><th /></tr></thead>
-        <tbody>
-          {classes.map((row) => (
-            <tr key={row.id}>
-              <td><strong>{row.name}</strong><div className="gk-muted">{row.category || (row.is_private ? 'Private' : 'Group')}{row.description ? ` · ${row.description}` : ''}</div></td>
-              <td>{row.trainer_name || '—'}</td>
-              <td>{row.trainer_phone || '—'}<div className="gk-muted">{row.trainer_email || ''}</div></td>
-              <td>{row.schedule} · {row.duration_minutes}m</td>
-              <td>{taken(row.id)} of {row.capacity}</td>
-              <td>{formatINR(row.price)}</td>
-              <td className="gk-actions">
-                <button type="button" className="gk-btn gk-btn--sm" onClick={() => navigate(`/pos/backend/participants/new?class=${row.id}`)}>Add participant</button>
-              </td>
-            </tr>
-          ))}
-          {!classes.length ? <tr><td colSpan={7} className="o-be-table__empty">No classes yet — create one on the line above</td></tr> : null}
-        </tbody>
-      </table>
       <div className="gk-section-row">
         <h3 className="gk-section">Trainers</h3>
         <button type="button" className="gk-btn" onClick={() => navigate('/pos/backend/trainers/new')}>Add trainer</button>
       </div>
-      <table className="o-be-table gk-table">
-        <thead><tr><th>Name</th><th>Sport</th><th>Phone</th><th>Email</th><th>Hours</th><th>Status</th></tr></thead>
-        <tbody>
-          {trainers.map((trainer) => (
-            <tr key={trainer.id} className="is-link" onClick={() => navigate(`/pos/backend/trainers/${trainer.id}`)}>
-              <td><strong>{trainer.name}</strong></td>
-              <td>{trainer.specialization}</td>
-              <td>{trainer.phone || '—'}</td>
-              <td>{trainer.email || '—'}</td>
-              <td>{trainer.availability || '—'}</td>
-              <td>{trainer.isActive === false ? 'Inactive' : 'Active'}</td>
-            </tr>
-          ))}
-          {!trainers.length ? <tr><td colSpan={6} className="o-be-table__empty">No trainers yet — add one from this page</td></tr> : null}
-        </tbody>
-      </table>
-      <h3 className="gk-section">Participants</h3>
-      <table className="o-be-table gk-table">
-        <thead><tr><th>Name</th><th>Class</th><th>Status</th><th /></tr></thead>
-        <tbody>
-          {registrations.map((row) => (
-            <tr key={row.id}>
-              <td><strong>{row.name}</strong></td>
-              <td>{row.class_name || '—'}</td>
-              <td>{row.status === 'WAITLIST' ? 'Waitlist' : row.status === 'ATTENDED' ? 'Attended' : 'Registered'}</td>
-              <td className="gk-actions">
-                <button type="button" className="gk-btn gk-btn--sm" onClick={() => void act(() => api(`/api/gym/registrations/${row.id}/remove`, { method: 'POST', body: '{}' }), `${row.name} removed`, reload)}>Remove</button>
-              </td>
-            </tr>
-          ))}
-          {!registrations.length ? <tr><td colSpan={4} className="o-be-table__empty">No participants yet — add one from a class row</td></tr> : null}
-        </tbody>
-      </table>
+      <ChromeRecords
+        items={[
+          ...classes.map((row) => ({ id: row.id, title: row.name, subtitle: row.trainer_name || row.category, meta: row.schedule, href: `/pos/backend/participants/new?class=${row.id}` })),
+          ...trainers.map((trainer) => ({ id: trainer.id, title: trainer.name, subtitle: trainer.specialization, meta: trainer.availability || 'Trainer', href: `/pos/backend/trainers/${trainer.id}` })),
+          ...registrations.map((row) => ({ id: row.id, title: row.name, subtitle: row.class_name || 'Class', meta: row.status === 'WAITLIST' ? 'Waitlist' : row.status === 'ATTENDED' ? 'Attended' : 'Registered' })),
+        ]}
+        empty="No classes yet — create one on the line above"
+      >
+        {(page) => (
+          <>
+            <table className="o-be-table gk-table">
+              <thead><tr><th>Class</th><th>Trainer</th><th>Contact</th><th>Schedule</th><th>Places</th><th>Price</th><th /></tr></thead>
+              <tbody>
+                {take(classes, page).map((row) => (
+                  <tr key={row.id}>
+                    <td><strong>{row.name}</strong><div className="gk-muted">{row.category || (row.is_private ? 'Private' : 'Group')}{row.description ? ` · ${row.description}` : ''}</div></td>
+                    <td>{row.trainer_name || '—'}</td>
+                    <td>{row.trainer_phone || '—'}<div className="gk-muted">{row.trainer_email || ''}</div></td>
+                    <td>{row.schedule} · {row.duration_minutes}m</td>
+                    <td>{taken(row.id)} of {row.capacity}</td>
+                    <td>{formatINR(row.price)}</td>
+                    <td className="gk-actions">
+                      <button type="button" className="gk-btn gk-btn--sm" onClick={() => navigate(`/pos/backend/participants/new?class=${row.id}`)}>Add participant</button>
+                    </td>
+                  </tr>
+                ))}
+                {!classes.length ? <tr><td colSpan={7} className="o-be-table__empty">No classes yet — create one on the line above</td></tr> : null}
+              </tbody>
+            </table>
+            <table className="o-be-table gk-table">
+              <thead><tr><th>Name</th><th>Sport</th><th>Phone</th><th>Email</th><th>Hours</th><th>Status</th></tr></thead>
+              <tbody>
+                {take(trainers, page).map((trainer) => (
+                  <tr key={trainer.id} className="is-link" onClick={() => navigate(`/pos/backend/trainers/${trainer.id}`)}>
+                    <td><strong>{trainer.name}</strong></td>
+                    <td>{trainer.specialization}</td>
+                    <td>{trainer.phone || '—'}</td>
+                    <td>{trainer.email || '—'}</td>
+                    <td>{trainer.availability || '—'}</td>
+                    <td>{trainer.isActive === false ? 'Inactive' : 'Active'}</td>
+                  </tr>
+                ))}
+                {!trainers.length ? <tr><td colSpan={6} className="o-be-table__empty">No trainers yet — add one from this page</td></tr> : null}
+              </tbody>
+            </table>
+            <h3 className="gk-section">Participants</h3>
+            <table className="o-be-table gk-table">
+              <thead><tr><th>Name</th><th>Class</th><th>Trainer</th><th>Status</th><th /></tr></thead>
+              <tbody>
+                {take(registrations, page).map((row) => (
+                  <tr key={row.id}>
+                    <td><strong>{row.name}</strong></td>
+                    <td>{row.class_name || '—'}{row.class_schedule ? <div className="gk-muted">{row.class_schedule}</div> : null}</td>
+                    <td>{row.trainer_name || '—'}{row.trainer_phone ? <div className="gk-muted">{row.trainer_phone}</div> : null}</td>
+                    <td>{row.status === 'WAITLIST' ? 'Waitlist' : row.status === 'ATTENDED' ? 'Attended' : 'Registered'}</td>
+                    <td className="gk-actions">
+                      <button type="button" className="gk-btn gk-btn--sm" onClick={() => void act(() => api(`/api/gym/registrations/${row.id}/remove`, { method: 'POST', body: '{}' }), `${row.name} removed`, reload)}>Remove</button>
+                    </td>
+                  </tr>
+                ))}
+                {!registrations.length ? <tr><td colSpan={5} className="o-be-table__empty">No participants yet — add one from a class row</td></tr> : null}
+              </tbody>
+            </table>
+          </>
+        )}
+      </ChromeRecords>
     </Shell>
   );
 }
@@ -559,32 +678,44 @@ export function EmployeesPage() {
   return (
     <Shell title="Employees" error={error}>
       <Head title="Employees" />
-      <table className="o-be-table gk-table">
-        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Focus</th><th /></tr></thead>
-        <tbody>
-          {employees.map((row) => (
-            <tr key={row.id}>
-              <td><strong>{row.name}</strong></td>
-              <td>{row.email}</td>
-              <td>
-                <Dropdown
-                  label={`${row.name} role`}
-                  value={row.role}
-                  options={roleOptions.some((option) => option.value === row.role) ? roleOptions : [{ value: row.role, label: ROLE_LABELS[row.role] ?? row.role }, ...roleOptions]}
-                  onChange={(role) => void act(() => api(`/api/gym/employees/${row.id}`, { method: 'PATCH', body: JSON.stringify({ role }) }), 'Role updated', reload)}
-                />
-              </td>
-              <td>{row.phone || '—'}</td>
-              <td>{row.specialization || '—'}</td>
-              <td className="gk-actions">
-                <button type="button" className="gk-btn gk-btn--sm" onClick={() => mark(row.id, 'IN')}>Clock in</button>
-                <button type="button" className="gk-btn gk-btn--sm" onClick={() => mark(row.id, 'OUT')}>Clock out</button>
-              </td>
-            </tr>
-          ))}
-          {!employees.length ? <tr><td colSpan={6} className="o-be-table__empty">No employees yet</td></tr> : null}
-        </tbody>
-      </table>
+      <ChromeRecords
+        items={employees.map((row) => ({
+          id: row.id,
+          title: row.name,
+          subtitle: ROLE_LABELS[row.role] ?? row.role,
+          meta: row.specialization || row.email,
+        }))}
+        empty="No employees yet"
+      >
+        {(page) => (
+          <table className="o-be-table gk-table">
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Focus</th><th /></tr></thead>
+            <tbody>
+              {take(employees, page).map((row) => (
+                <tr key={row.id}>
+                  <td><strong>{row.name}</strong></td>
+                  <td>{row.email}</td>
+                  <td>
+                    <Dropdown
+                      label={`${row.name} role`}
+                      value={row.role}
+                      options={roleOptions.some((option) => option.value === row.role) ? roleOptions : [{ value: row.role, label: ROLE_LABELS[row.role] ?? row.role }, ...roleOptions]}
+                      onChange={(role) => void act(() => api(`/api/gym/employees/${row.id}`, { method: 'PATCH', body: JSON.stringify({ role }) }), 'Role updated', reload)}
+                    />
+                  </td>
+                  <td>{row.phone || '—'}</td>
+                  <td>{row.specialization || '—'}</td>
+                  <td className="gk-actions">
+                    <button type="button" className="gk-btn gk-btn--sm" onClick={() => mark(row.id, 'IN')}>Clock in</button>
+                    <button type="button" className="gk-btn gk-btn--sm" onClick={() => mark(row.id, 'OUT')}>Clock out</button>
+                  </td>
+                </tr>
+              ))}
+              {!employees.length ? <tr><td colSpan={6} className="o-be-table__empty">No employees yet</td></tr> : null}
+            </tbody>
+          </table>
+        )}
+      </ChromeRecords>
       <h3 className="gk-section">Attendance</h3>
       <table className="o-be-table gk-table">
         <thead><tr><th>Employee</th><th>Status</th><th>When</th><th>Recorded by</th></tr></thead>
@@ -619,19 +750,97 @@ export function EmployeesPage() {
   );
 }
 
+type TaskRow = {
+  id: string;
+  title: string;
+  notes: string;
+  status: string;
+  starts_at: string;
+  ends_at: string | null;
+  facility: string;
+  facility_id: string;
+  facility_status: string;
+  actor?: string;
+  category: string;
+  priority: string;
+  assigned_to: string;
+  cost: number;
+};
+
+const PRIORITY_RANK: Record<string, number> = { URGENT: 0, HIGH: 1, NORMAL: 2, LOW: 3 };
+
+function byUrgency(a: TaskRow, b: TaskRow) {
+  if ((a.status === 'OPEN') !== (b.status === 'OPEN')) return a.status === 'OPEN' ? -1 : 1;
+  if (a.status === 'OPEN') return (PRIORITY_RANK[a.priority] ?? 2) - (PRIORITY_RANK[b.priority] ?? 2) || b.starts_at.localeCompare(a.starts_at);
+  return (b.ends_at ?? '').localeCompare(a.ends_at ?? '');
+}
+
 export function MaintenancePage() {
   const navigate = useNavigate();
-  const { data, error, reload } = useLoad<{ records: { id: string; title: string; notes: string; status: string; starts_at: string; facility: string; actor?: string }[] }>('/api/gym/maintenance');
+  const { data, error, reload } = useLoad<{ records: TaskRow[] }>('/api/gym/maintenance');
+  const [q, setQ] = useState('');
+  const [status, setStatus] = useState('all');
+  const [facility, setFacility] = useState('all');
   const records = data?.records ?? [];
+  const open = records.filter((row) => row.status === 'OPEN');
+  const since = Date.now() - 30 * 86_400_000;
+  const recent = records.filter((row) => row.status !== 'OPEN' && row.ends_at && new Date(row.ends_at).getTime() >= since);
+  const closedFacilities = new Set(open.filter((row) => row.facility_status === 'MAINTENANCE').map((row) => row.facility_id)).size;
+  const facilityOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const row of records) seen.set(row.facility_id, row.facility);
+    return [{ value: 'all', label: 'All facilities' }, ...[...seen.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }))];
+  }, [records]);
+  const needle = q.trim().toLowerCase();
+  const rows = records
+    .filter((row) => {
+      if (status !== 'all' && row.status !== status) return false;
+      if (facility !== 'all' && row.facility_id !== facility) return false;
+      if (needle && !`${row.title} ${row.notes} ${row.facility} ${row.category} ${row.assigned_to} ${row.actor ?? ''}`.toLowerCase().includes(needle)) return false;
+      return true;
+    })
+    .sort(byUrgency);
   return (
     <Shell title="Maintenance" error={error}>
       <Head title="Maintenance">
         <button type="button" className="gk-btn" onClick={() => navigate('/pos/backend/maintenance/new')}>Add task</button>
       </Head>
+      <section className="o-track__status">
+        <article className="o-track__stat o-track__stat--plain"><span>Open tasks</span><strong>{open.length}</strong><em>Waiting to be fixed</em></article>
+        <article className="o-track__stat o-track__stat--plain"><span>Urgent or high</span><strong>{open.filter((row) => row.priority === 'URGENT' || row.priority === 'HIGH').length}</strong><em>Fix these first</em></article>
+        <article className="o-track__stat o-track__stat--plain"><span>Facilities closed</span><strong>{closedFacilities}</strong><em>Blocked for bookings</em></article>
+        <article className="o-track__stat o-track__stat--plain"><span>Spent</span><strong>{formatINR(recent.reduce((sum, row) => sum + row.cost, 0))}</strong><em>{recent.length} tasks done in 30 days</em></article>
+      </section>
+      <div className="gk-toolbar">
+        <input className="gk-input" value={q} placeholder="Search task, facility or person" aria-label="Search maintenance" onChange={(event) => setQ(event.target.value)} />
+        <Dropdown
+          label="Task status"
+          value={status}
+          onChange={setStatus}
+          options={[
+            { value: 'all', label: 'All tasks' },
+            { value: 'OPEN', label: 'Open' },
+            { value: 'CLOSED', label: 'Done' },
+          ]}
+        />
+        <Dropdown label="Facility" value={facility} onChange={setFacility} options={facilityOptions} />
+      </div>
+      <ChromeRecords
+        items={rows.map((row) => ({
+          id: row.id,
+          title: row.title,
+          subtitle: row.facility,
+          meta: row.status === 'OPEN' ? priorityLabel(row.priority) : 'Done',
+          href: `/pos/backend/maintenance/${row.id}`,
+          when: row.starts_at,
+        }))}
+        empty={records.length ? 'No tasks match these filters' : 'No maintenance tasks yet — add one from this page'}
+      >
+        {(page) => (
       <table className="o-be-table gk-table">
-        <thead><tr><th>Done</th><th>Facility</th><th>Task</th><th>Notes</th><th>Raised by</th><th>Started</th><th>Status</th></tr></thead>
+        <thead><tr><th>Done</th><th>Task</th><th>Facility</th><th>Priority</th><th>Assigned to</th><th>Raised by</th><th>Status</th><th>Cost</th></tr></thead>
         <tbody>
-          {records.map((row) => (
+          {take(rows, page).map((row) => (
             <tr key={row.id} className={`is-link${row.status === 'CLOSED' ? ' is-done' : ''}`} onClick={() => navigate(`/pos/backend/maintenance/${row.id}`)}>
               <td onClick={stop}>
                 <input
@@ -643,17 +852,24 @@ export function MaintenancePage() {
                   onChange={() => void act(() => api(`/api/gym/maintenance/${row.id}/close`, { method: 'POST', body: '{}' }), 'Task done', reload)}
                 />
               </td>
-              <td>{row.facility}</td>
-              <td><strong>{row.title}</strong></td>
-              <td>{row.notes || '—'}</td>
-              <td>{row.actor || '—'}</td>
-              <td>{when(row.starts_at)}</td>
-              <td>{row.status === 'OPEN' ? 'Open' : 'Done'}</td>
+              <td className="gk-wrap"><strong>{row.title}</strong><div className="gk-muted">{row.category}{row.notes ? ` · ${row.notes}` : ''}</div></td>
+              <td>{row.facility}{row.status === 'OPEN' && row.facility_status === 'MAINTENANCE' ? <div className="gk-muted">Closed for bookings</div> : null}</td>
+              <td><span className={`gk-pill is-prio-${row.priority.toLowerCase()}`}>{priorityLabel(row.priority)}</span></td>
+              <td>{row.assigned_to || '—'}</td>
+              <td>{row.actor || '—'}<div className="gk-muted">{when(row.starts_at)}</div></td>
+              <td>{row.status === 'OPEN' ? 'Open' : 'Done'}{row.status !== 'OPEN' && row.ends_at ? <div className="gk-muted">{when(row.ends_at)}</div> : null}</td>
+              <td>{row.cost ? formatINR(row.cost) : '—'}</td>
             </tr>
           ))}
-          {!records.length ? <tr><td colSpan={7} className="o-be-table__empty">No maintenance tasks yet — add one from this page</td></tr> : null}
+          {!rows.length ? (
+            <tr>
+              <td colSpan={8} className="o-be-table__empty">{records.length ? 'No tasks match these filters' : 'No maintenance tasks yet — add one from this page'}</td>
+            </tr>
+          ) : null}
         </tbody>
       </table>
+        )}
+      </ChromeRecords>
     </Shell>
   );
 }
@@ -687,52 +903,68 @@ export function ShiftPage() {
       <Head title="Shift">
         <button type="button" className="gk-btn" onClick={() => navigate('/pos/backend/shift/new')}>Start my shift</button>
       </Head>
-      {open.length ? (
-        <div className="gk-shifts">
-          {open.map((row) => (
-            <article key={row.id} className="gk-shift" onClick={() => navigate(`/pos/backend/shift/${row.id}`)}>
-              <header>
-                <span className="gk-shift__avatar">{row.name.trim().charAt(0).toUpperCase()}</span>
-                <div>
-                  <strong>{row.name}</strong>
-                  <em>{row.roleLabel || (row.type === 'TRAINER' ? 'Trainer' : 'Staff')}</em>
-                </div>
-                <span className="gk-shift__live">On shift</span>
-              </header>
-              <p className="gk-shift__clock">{elapsed(row.startedAt)}</p>
-              <dl>
-                <div><dt>Started</dt><dd>{clock(row.startedAt)}</dd></div>
-                <div><dt>Bookings</dt><dd>{row.bookings}</dd></div>
-                <div><dt>Check-ins</dt><dd>{row.checkIns}</dd></div>
-                {row.type === 'TRAINER' ? <div><dt>Sessions</dt><dd>{row.sessions}</dd></div> : null}
-              </dl>
-              <footer onClick={stop}>
-                <button type="button" className="gk-btn" onClick={() => navigate(`/pos/backend/shift/${row.id}`)}>{row.type === 'TRAINER' ? 'Log sessions' : 'Open shift'}</button>
-                <button type="button" className="gk-btn" onClick={() => void act(() => api(`/api/gym/shifts/${row.id}/end`, { method: 'POST', body: '{}' }), `${row.name} clocked out`, reload)}>Clock out</button>
-              </footer>
-            </article>
-          ))}
-        </div>
-      ) : <p className="o-be-table__empty gk-empty-line">No one is on shift — start a shift from this page</p>}
-      <h3 className="gk-section">Earlier shifts</h3>
-      <table className="o-be-table gk-table">
-        <thead><tr><th>Name</th><th>Role</th><th>Started</th><th>Ended</th><th>Hours</th><th>Bookings</th><th>Check-ins</th><th>Sessions</th></tr></thead>
-        <tbody>
-          {closed.map((row) => (
-            <tr key={row.id} className="is-link" onClick={() => navigate(`/pos/backend/shift/${row.id}`)}>
-              <td><strong>{row.name}</strong></td>
-              <td>{row.roleLabel || (row.type === 'TRAINER' ? 'Trainer' : 'Staff')}</td>
-              <td>{when(row.startedAt)}</td>
-              <td>{row.endedAt ? when(row.endedAt) : '—'}</td>
-              <td>{elapsed(row.startedAt, row.endedAt)}</td>
-              <td>{row.bookings}</td>
-              <td>{row.checkIns}</td>
-              <td>{row.type === 'TRAINER' ? row.sessions : '—'}</td>
-            </tr>
-          ))}
-          {!closed.length ? <tr><td colSpan={8} className="o-be-table__empty">No finished shifts yet</td></tr> : null}
-        </tbody>
-      </table>
+      <ChromeRecords
+        items={[...open, ...closed].map((row) => ({
+          id: row.id,
+          title: row.name,
+          subtitle: row.roleLabel || (row.type === 'TRAINER' ? 'Trainer' : 'Staff'),
+          meta: row.endedAt ? 'Finished' : 'On shift',
+          href: `/pos/backend/shift/${row.id}`,
+          when: row.startedAt,
+        }))}
+        empty="No one is on shift — start a shift from this page"
+      >
+        {(page) => (
+          <>
+            {take(open, page).length ? (
+              <div className="gk-shifts">
+                {take(open, page).map((row) => (
+                  <article key={row.id} className="gk-shift" onClick={() => navigate(`/pos/backend/shift/${row.id}`)}>
+                    <header>
+                      <span className="gk-shift__avatar">{row.name.trim().charAt(0).toUpperCase()}</span>
+                      <div>
+                        <strong>{row.name}</strong>
+                        <em>{row.roleLabel || (row.type === 'TRAINER' ? 'Trainer' : 'Staff')}</em>
+                      </div>
+                      <span className="gk-shift__live">On shift</span>
+                    </header>
+                    <p className="gk-shift__clock">{elapsed(row.startedAt)}</p>
+                    <dl>
+                      <div><dt>Started</dt><dd>{clock(row.startedAt)}</dd></div>
+                      <div><dt>Bookings</dt><dd>{row.bookings}</dd></div>
+                      <div><dt>Check-ins</dt><dd>{row.checkIns}</dd></div>
+                      {row.type === 'TRAINER' ? <div><dt>Sessions</dt><dd>{row.sessions}</dd></div> : null}
+                    </dl>
+                    <footer onClick={stop}>
+                      <button type="button" className="gk-btn" onClick={() => navigate(`/pos/backend/shift/${row.id}`)}>{row.type === 'TRAINER' ? 'Log sessions' : 'Open shift'}</button>
+                      <button type="button" className="gk-btn" onClick={() => void act(() => api(`/api/gym/shifts/${row.id}/end`, { method: 'POST', body: '{}' }), `${row.name} clocked out`, reload)}>Clock out</button>
+                    </footer>
+                  </article>
+                ))}
+              </div>
+            ) : <p className="o-be-table__empty gk-empty-line">No one is on shift — start a shift from this page</p>}
+            <h3 className="gk-section">Earlier shifts</h3>
+            <table className="o-be-table gk-table">
+              <thead><tr><th>Name</th><th>Role</th><th>Started</th><th>Ended</th><th>Hours</th><th>Bookings</th><th>Check-ins</th><th>Sessions</th></tr></thead>
+              <tbody>
+                {take(closed, page).map((row) => (
+                  <tr key={row.id} className="is-link" onClick={() => navigate(`/pos/backend/shift/${row.id}`)}>
+                    <td><strong>{row.name}</strong></td>
+                    <td>{row.roleLabel || (row.type === 'TRAINER' ? 'Trainer' : 'Staff')}</td>
+                    <td>{when(row.startedAt)}</td>
+                    <td>{row.endedAt ? when(row.endedAt) : '—'}</td>
+                    <td>{elapsed(row.startedAt, row.endedAt)}</td>
+                    <td>{row.bookings}</td>
+                    <td>{row.checkIns}</td>
+                    <td>{row.type === 'TRAINER' ? row.sessions : '—'}</td>
+                  </tr>
+                ))}
+                {!closed.length ? <tr><td colSpan={8} className="o-be-table__empty">No finished shifts yet</td></tr> : null}
+              </tbody>
+            </table>
+          </>
+        )}
+      </ChromeRecords>
     </Shell>
   );
 }
@@ -756,44 +988,219 @@ type SessionRow = {
 export function SessionsPage() {
   const navigate = useNavigate();
   const { data, error } = useLoad<{ sessions: SessionRow[] }>('/api/gym/sessions');
+  const [trainer, setTrainer] = useState('all');
+  const [period, setPeriod] = useState('week');
   const sessions = data?.sessions ?? [];
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-  const todays = sessions.filter((row) => row.date === today);
-  const collected = todays.filter((row) => row.payment.startsWith('Paid')).reduce((sum, row) => sum + row.amount, 0);
+  const weekStart = new Date(Date.parse(`${today}T12:00:00+05:30`) - 6 * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const trainerOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const row of sessions) seen.set(row.trainerName, row.trainerName);
+    return [{ value: 'all', label: 'All trainers' }, ...[...seen.keys()].sort().map((name) => ({ value: name, label: name }))];
+  }, [sessions]);
+  const rows = sessions.filter((row) => {
+    if (trainer !== 'all' && row.trainerName !== trainer) return false;
+    if (period === 'today' && row.date !== today) return false;
+    if (period === 'week' && row.date < weekStart) return false;
+    return true;
+  });
+  const span = period === 'today' ? 'Today' : period === 'week' ? 'Last 7 days' : 'All time';
+  const collected = rows.filter((row) => row.payment.startsWith('Paid')).reduce((sum, row) => sum + row.amount, 0);
+  const due = rows.filter((row) => row.payment === 'Due').reduce((sum, row) => sum + row.amount, 0);
   return (
     <Shell title="Sessions" error={error}>
       <Head title="Sessions">
         <button type="button" className="gk-btn" onClick={() => navigate('/pos/backend/shift/new?role=trainer')}>Log sessions</button>
       </Head>
       <section className="o-track__status">
-        <article className="o-track__stat o-track__stat--plain"><span>Sessions today</span><strong>{todays.length}</strong><em>Logged by trainers</em></article>
-        <article className="o-track__stat o-track__stat--plain"><span>Minutes coached</span><strong>{todays.reduce((sum, row) => sum + row.minutes, 0)}</strong><em>Today</em></article>
-        <article className="o-track__stat o-track__stat--plain"><span>People coached</span><strong>{todays.reduce((sum, row) => sum + row.people, 0)}</strong><em>Today</em></article>
-        <article className="o-track__stat o-track__stat--plain"><span>Collected</span><strong>{formatINR(collected)}</strong><em>Paid sessions today</em></article>
+        <article className="o-track__stat o-track__stat--plain"><span>Sessions</span><strong>{rows.length}</strong><em>{span}</em></article>
+        <article className="o-track__stat o-track__stat--plain"><span>Hours coached</span><strong>{(rows.reduce((sum, row) => sum + row.minutes, 0) / 60).toFixed(1).replace(/\.0$/, '')}</strong><em>{span}</em></article>
+        <article className="o-track__stat o-track__stat--plain"><span>People coached</span><strong>{rows.reduce((sum, row) => sum + row.people, 0)}</strong><em>{span}</em></article>
+        <article className="o-track__stat o-track__stat--plain"><span>Collected</span><strong>{formatINR(collected)}</strong><em>{due ? `${formatINR(due)} still due` : 'Nothing due'}</em></article>
       </section>
-      <table className="o-be-table gk-table">
-        <thead><tr><th>Date</th><th>Trainer</th><th>Start</th><th>Minutes</th><th>Facility</th><th>Session</th><th>Type</th><th>People</th><th>Visitors</th><th>Amount</th><th>Payment</th></tr></thead>
-        <tbody>
-          {sessions.map((row) => (
-            <tr key={row.id} className="is-link" onClick={() => navigate(`/pos/backend/shift/${row.shiftId}`)}>
-              <td>{row.date === today ? 'Today' : row.date}</td>
-              <td><strong>{row.trainerName}</strong></td>
-              <td>{row.startTime}</td>
-              <td>{row.minutes}</td>
-              <td>{row.facility || '—'}</td>
-              <td>{row.activity}</td>
-              <td>{row.kind}</td>
-              <td>{row.people}</td>
-              <td className="gk-wrap">{row.visitors || '—'}</td>
-              <td>{formatINR(row.amount)}</td>
-              <td>{row.payment}</td>
-            </tr>
-          ))}
-          {!sessions.length ? <tr><td colSpan={11} className="o-be-table__empty">No sessions yet — trainers log them from their shift at the end of the day</td></tr> : null}
-        </tbody>
-      </table>
+      <div className="gk-toolbar">
+        <Dropdown
+          label="Period"
+          value={period}
+          onChange={setPeriod}
+          options={[
+            { value: 'today', label: 'Today' },
+            { value: 'week', label: 'Last 7 days' },
+            { value: 'all', label: 'All sessions' },
+          ]}
+        />
+        <Dropdown label="Trainer" value={trainer} onChange={setTrainer} options={trainerOptions} />
+      </div>
+      <ChromeRecords
+        items={rows.map((row) => ({
+          id: row.id,
+          title: row.activity,
+          subtitle: row.trainerName,
+          meta: `${row.facility || 'Floor'} · ${row.people} people`,
+          href: `/pos/backend/shift/${row.shiftId}`,
+          when: `${row.date}T${row.startTime}:00+05:30`,
+        }))}
+        empty={sessions.length ? 'No sessions match these filters' : 'No sessions yet — trainers log them from their shift at the end of the day'}
+      >
+        {(page) => (
+          <table className="o-be-table gk-table">
+            <thead><tr><th>Date</th><th>Trainer</th><th>Time</th><th>Session</th><th>Facility</th><th>People</th><th>Visitors</th><th>Amount</th></tr></thead>
+            <tbody>
+              {take(rows, page).map((row) => (
+                <tr key={row.id} className="is-link" onClick={() => navigate(`/pos/backend/shift/${row.shiftId}`)}>
+                  <td>{dayLabel(row.date, today)}</td>
+                  <td><strong>{row.trainerName}</strong></td>
+                  <td>{row.startTime}<div className="gk-muted">{row.minutes} min</div></td>
+                  <td>{row.activity}<div className="gk-muted">{row.kind}</div></td>
+                  <td>{row.facility || '—'}</td>
+                  <td>{row.people}</td>
+                  <td className="gk-wrap">{row.visitors || '—'}</td>
+                  <td>{row.amount ? formatINR(row.amount) : '—'}<div className="gk-muted">{row.payment}</div></td>
+                </tr>
+              ))}
+              {!rows.length ? (
+                <tr>
+                  <td colSpan={8} className="o-be-table__empty">{sessions.length ? 'No sessions match these filters' : 'No sessions yet — trainers log them from their shift at the end of the day'}</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        )}
+      </ChromeRecords>
     </Shell>
   );
+}
+
+function JoinRequestsList({ route }: { route: 'TRAINER' | 'STAFF' }) {
+  const navigate = useNavigate();
+  const title = route === 'TRAINER' ? 'Trainer requests' : 'Membership requests';
+  const base = route === 'TRAINER' ? '/pos/backend/trainer-requests' : '/pos/backend/membership-requests';
+  const { data, error, reload } = useLoad<{ requests: JoinRequest[] }>(`/api/gym/join-requests?route=${route}`);
+  const [q, setQ] = useState('');
+  const [status, setStatus] = useState('open');
+  const [trainer, setTrainer] = useState('all');
+  const requests = data?.requests ?? [];
+  const trainerOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const row of requests) if (row.trainerId) seen.set(row.trainerId, row.trainerName);
+    return [
+      { value: 'all', label: 'All trainers' },
+      { value: '', label: 'Any trainer' },
+      ...[...seen.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label })),
+    ];
+  }, [requests]);
+  const needle = q.trim().toLowerCase();
+  const rows = requests.filter((row) => {
+    if (status === 'open' && row.status !== 'NEW' && row.status !== 'CONTACTED') return false;
+    if (status !== 'open' && status !== 'all' && row.status !== status) return false;
+    if (route === 'TRAINER' && trainer !== 'all' && row.trainerId !== trainer) return false;
+    if (needle && !`${row.ref} ${row.name} ${row.mobile} ${row.email} ${row.sport} ${row.trainerName} ${row.planName}`.toLowerCase().includes(needle)) return false;
+    return true;
+  });
+  const count = (value: string) => requests.filter((row) => row.status === value).length;
+  const paidWaiting = requests.filter((row) => row.paymentStatus === 'PAID' && (row.status === 'NEW' || row.status === 'CONTACTED')).length;
+  const columns = route === 'TRAINER' ? 9 : 8;
+  return (
+    <Shell title={title} error={error}>
+      <Head title={title} />
+      <section className="o-track__status">
+        <article className="o-track__stat o-track__stat--plain"><span>New</span><strong>{count('NEW')}</strong><em>Waiting for a call</em></article>
+        <article className="o-track__stat o-track__stat--plain"><span>Contacted</span><strong>{count('CONTACTED')}</strong><em>Called, not decided</em></article>
+        <article className="o-track__stat o-track__stat--plain"><span>Paid, not approved</span><strong>{paidWaiting}</strong><em>Approve to start the plan</em></article>
+        <article className="o-track__stat o-track__stat--plain"><span>Approved</span><strong>{count('APPROVED')}</strong><em>Now members</em></article>
+      </section>
+      <div className="gk-toolbar">
+        <input className="gk-input" value={q} placeholder="Search name, phone or ref" aria-label={`Search ${title.toLowerCase()}`} onChange={(event) => setQ(event.target.value)} />
+        <Dropdown
+          label="Request status"
+          value={status}
+          onChange={setStatus}
+          options={[
+            { value: 'open', label: 'Open requests' },
+            { value: 'NEW', label: 'New' },
+            { value: 'CONTACTED', label: 'Contacted' },
+            { value: 'APPROVED', label: 'Approved' },
+            { value: 'DECLINED', label: 'Declined' },
+            { value: 'all', label: 'All requests' },
+          ]}
+        />
+        {route === 'TRAINER' ? <Dropdown label="Trainer" value={trainer} onChange={setTrainer} options={trainerOptions} /> : null}
+      </div>
+      <ChromeRecords
+        items={rows.map((row) => ({
+          id: row.id,
+          title: `${row.ref} · ${row.name}`,
+          subtitle: row.sport,
+          meta: row.wantsTrainer ? (row.trainerName || 'Unassigned') : (row.planName || 'No plan yet'),
+          href: `${base}/${row.id}`,
+          when: row.createdAt,
+        }))}
+        empty={requests.length ? 'No requests match these filters' : route === 'TRAINER' ? 'No trainer requests yet — they arrive when someone registers with a trainer' : 'No requests yet — they arrive when someone registers on the site'}
+      >
+        {(page) => (
+      <table className="o-be-table gk-table">
+        <thead>
+          <tr>
+            <th>Request</th>
+            <th>Applicant</th>
+            <th>Contact</th>
+            <th>Sport</th>
+            {route === 'TRAINER' ? <><th>Trainer</th><th>Preferred time</th></> : <th>Government ID</th>}
+            <th>Plan</th>
+            <th>Status</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {take(rows, page).map((row) => (
+            <tr key={row.id} className="is-link" onClick={() => navigate(`${base}/${row.id}`)}>
+              <td><strong>{row.ref}</strong><div className="gk-muted">{whenText(row.createdAt)}</div></td>
+              <td><strong>{row.name}</strong><div className="gk-muted">{row.age != null ? `${row.age} yrs` : '—'}</div></td>
+              <td>{row.mobile}<div className="gk-muted">{row.email}{row.hasPassword ? ' · login set' : ''}{row.hasPortrait ? ' · photo' : ''}</div></td>
+              <td>{row.sport}</td>
+              {route === 'TRAINER'
+                ? <><td>{row.trainerName || 'Unassigned'}</td><td>{row.preferredSlotLabel || 'No preference'}</td></>
+                : <td>{row.govtIdLabel || '—'}{row.pincode ? <div className="gk-muted">{row.pincode}</div> : null}</td>}
+              <td>{row.planName ? `${row.planName} · ${formatINR(row.amount)}` : 'No plan yet'}<div className="gk-muted">{row.becomeMember ? 'Wants membership' : row.isMember ? 'Says member' : joinPayment(row)}</div></td>
+              <td><span className={`gk-pill is-join-${row.status.toLowerCase()}`}>{JOIN_STATUS[row.status] ?? row.status}</span></td>
+              <td className="gk-actions">
+                <a className="gk-btn gk-btn--sm" href={`tel:+91${row.mobile}`} onClick={stop}>Call</a>
+                {row.status === 'NEW' ? (
+                  <button
+                    type="button"
+                    className="gk-btn gk-btn--sm"
+                    onClick={(event) => {
+                      stop(event);
+                      void act(() => api(`/api/gym/join-requests/${row.id}/contacted`, { method: 'POST', body: '{}' }), 'Marked contacted', reload);
+                    }}
+                  >
+                    Contacted
+                  </button>
+                ) : null}
+              </td>
+            </tr>
+          ))}
+          {!rows.length ? (
+            <tr>
+              <td colSpan={columns} className="o-be-table__empty">
+                {requests.length ? 'No requests match these filters' : route === 'TRAINER' ? 'No trainer requests yet — they arrive when someone registers with a trainer' : 'No requests yet — they arrive when someone registers on the site'}
+              </td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+        )}
+      </ChromeRecords>
+    </Shell>
+  );
+}
+
+export function TrainerRequestsPage() {
+  return <JoinRequestsList route="TRAINER" />;
+}
+
+export function MembershipRequestsPage() {
+  return <JoinRequestsList route="STAFF" />;
 }
 
 export function NotificationsPage() {
@@ -802,22 +1209,35 @@ export function NotificationsPage() {
   return (
     <Shell title="Notifications" error={error}>
       <Head title="Notifications" />
-      <table className="o-be-table gk-table">
-        <thead><tr><th>Title</th><th>Message</th><th>When</th><th /></tr></thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id} className={row.read_at ? 'is-done' : ''}>
-              <td><strong>{row.title}</strong></td>
-              <td>{row.body}</td>
-              <td>{whenText(row.created_at)}</td>
-              <td className="gk-actions">
-                {row.read_at ? 'Read' : <button type="button" className="gk-btn gk-btn--sm" onClick={() => void act(() => api(`/api/gym/notifications/${row.id}/read`, { method: 'POST', body: '{}' }), 'Marked read', reload)}>Mark read</button>}
-              </td>
-            </tr>
-          ))}
-          {!rows.length ? <tr><td colSpan={4} className="o-be-table__empty">No notifications yet</td></tr> : null}
-        </tbody>
-      </table>
+      <ChromeRecords
+        items={rows.map((row) => ({
+          id: row.id,
+          title: row.title,
+          subtitle: row.body,
+          meta: row.read_at ? 'Read' : 'New',
+          when: row.created_at,
+        }))}
+        empty="No notifications yet"
+      >
+        {(page) => (
+          <table className="o-be-table gk-table">
+            <thead><tr><th>Title</th><th>Message</th><th>When</th><th /></tr></thead>
+            <tbody>
+              {take(rows, page).map((row) => (
+                <tr key={row.id} className={row.read_at ? 'is-done' : ''}>
+                  <td><strong>{row.title}</strong></td>
+                  <td>{row.body}</td>
+                  <td>{whenText(row.created_at)}</td>
+                  <td className="gk-actions">
+                    {row.read_at ? 'Read' : <button type="button" className="gk-btn gk-btn--sm" onClick={() => void act(() => api(`/api/gym/notifications/${row.id}/read`, { method: 'POST', body: '{}' }), 'Marked read', reload)}>Mark read</button>}
+                  </td>
+                </tr>
+              ))}
+              {!rows.length ? <tr><td colSpan={4} className="o-be-table__empty">No notifications yet</td></tr> : null}
+            </tbody>
+          </table>
+        )}
+      </ChromeRecords>
     </Shell>
   );
 }

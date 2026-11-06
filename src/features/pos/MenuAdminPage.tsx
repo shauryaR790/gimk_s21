@@ -8,6 +8,7 @@ import { Drawer } from '../../components/Drawer';
 import { Input, TextArea } from '../../components/Input';
 import { pushToast } from '../../components/Toast';
 import { usePos } from './PosContext';
+import { ChromeRecords } from './odoo/chrome';
 
 async function uploadMenuPhoto(file: File) {
   const mime = file.type === 'image/png' || file.type === 'image/webp' || file.type === 'image/jpeg'
@@ -145,70 +146,88 @@ export function MenuAdminPage() {
         </div>
       </div>
 
-      {pos.categories.map((category) => {
-        const items = visible
-          .filter((item) => item.categoryId === category.id)
-          .sort((a, b) => a.sortOrder - b.sortOrder);
-        if (!items.length) return null;
-        return (
-          <section key={category.id} className="menu-cat">
-            <header>
-              <h2>{category.name}</h2>
-              <span>{items.length}</span>
-            </header>
-            <div className="menu-admin">
-              {items.map((item) => (
-                <article key={item.id} className={item.isAvailable ? 'menu-row' : 'menu-row sold'}>
-                  <span className="menu-thumb">
-                    {item.imageUrl ? <img src={item.imageUrl} alt="" loading="lazy" /> : null}
-                  </span>
-                  <div className="menu-copy">
-                    <strong>{item.name}</strong>
-                    <span className="fine">
-                      {item.isVeg ? 'Veg' : 'Non-veg'}
-                      {item.isFavorite ? ' · Favorite' : ''}
-                      {item.shortcutNum || item.shortcutAlpha ? ` · ${[item.shortcutNum, item.shortcutAlpha].filter(Boolean).join(' / ')}` : ''}
-                      {item.addonGroupIds.length ? ` · ${item.addonGroupIds.length} add-on ${item.addonGroupIds.length === 1 ? 'group' : 'groups'}` : ''}
-                      {item.isAvailable ? '' : ' · Sold out'}
-                    </span>
-                  </div>
-                  <strong className="menu-price price">{formatINR(item.price)}</strong>
-                  <div className="menu-acts">
-                    <Button
-                      variant={item.isAvailable ? 'danger' : 'primary'}
-                      onClick={() => void pos.saveItem({ ...item, isAvailable: !item.isAvailable })}
-                    >
-                      {item.isAvailable ? 'Sold out' : 'Put back'}
-                    </Button>
-                    <Button variant="ghost" onClick={() => open(item)}>Edit</Button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-        );
-      })}
+      <ChromeRecords
+        items={visible.map((item) => ({
+          id: item.id,
+          title: item.name,
+          subtitle: pos.categories.find((category) => category.id === item.categoryId)?.name,
+          meta: item.isAvailable ? formatINR(item.price) : 'Sold out',
+          onOpen: () => open(item),
+        }))}
+        empty="No menu items yet"
+      >
+        {(page) => {
+          const ids = new Set(page.map((item) => item.id));
+          return (
+            <>
+              {pos.categories.map((category) => {
+                const items = visible
+                  .filter((item) => item.categoryId === category.id && ids.has(item.id))
+                  .sort((a, b) => a.sortOrder - b.sortOrder);
+                if (!items.length) return null;
+                return (
+                  <section key={category.id} className="menu-cat">
+                    <header>
+                      <h2>{category.name}</h2>
+                      <span>{items.length}</span>
+                    </header>
+                    <div className="menu-admin">
+                      {items.map((item) => (
+                        <article key={item.id} className={item.isAvailable ? 'menu-row' : 'menu-row sold'}>
+                          <span className="menu-thumb">
+                            {item.imageUrl ? <img src={item.imageUrl} alt="" loading="lazy" /> : null}
+                          </span>
+                          <div className="menu-copy">
+                            <strong>{item.name}</strong>
+                            <span className="fine">
+                              {item.isVeg ? 'Veg' : 'Non-veg'}
+                              {item.isFavorite ? ' · Favorite' : ''}
+                              {item.shortcutNum || item.shortcutAlpha ? ` · ${[item.shortcutNum, item.shortcutAlpha].filter(Boolean).join(' / ')}` : ''}
+                              {item.addonGroupIds.length ? ` · ${item.addonGroupIds.length} add-on ${item.addonGroupIds.length === 1 ? 'group' : 'groups'}` : ''}
+                              {item.isAvailable ? '' : ' · Sold out'}
+                            </span>
+                          </div>
+                          <strong className="menu-price price">{formatINR(item.price)}</strong>
+                          <div className="menu-acts">
+                            <Button
+                              variant={item.isAvailable ? 'danger' : 'primary'}
+                              onClick={() => void pos.saveItem({ ...item, isAvailable: !item.isAvailable })}
+                            >
+                              {item.isAvailable ? 'Sold out' : 'Put back'}
+                            </Button>
+                            <Button variant="ghost" onClick={() => open(item)}>Edit</Button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
 
-      <section className="menu-cat">
-        <header>
-          <h2>Add-ons</h2>
-          <span>{pos.addonGroups.reduce((sum, group) => sum + group.addons.length, 0)}</span>
-        </header>
-        {pos.addonGroups.map((group) => (
-          <div key={group.id} className="addon-admin">
-            <h3>{group.name}</h3>
-            {group.addons.map((addon) => (
-              <p key={addon.id} className="addon-admin-row">
-                <strong>{addon.name}</strong>
-                <span className="price">+{formatINR(addon.price)}</span>
-                <Button variant="ghost" onClick={() => void pos.saveAddon({ ...addon, isAvailable: !addon.isAvailable })}>
-                  {addon.isAvailable ? 'On' : 'Off'}
-                </Button>
-              </p>
-            ))}
-          </div>
-        ))}
-      </section>
+              <section className="menu-cat">
+                <header>
+                  <h2>Add-ons</h2>
+                  <span>{pos.addonGroups.reduce((sum, group) => sum + group.addons.length, 0)}</span>
+                </header>
+                {pos.addonGroups.map((group) => (
+                  <div key={group.id} className="addon-admin">
+                    <h3>{group.name}</h3>
+                    {group.addons.map((addon) => (
+                      <p key={addon.id} className="addon-admin-row">
+                        <strong>{addon.name}</strong>
+                        <span className="price">+{formatINR(addon.price)}</span>
+                        <Button variant="ghost" onClick={() => void pos.saveAddon({ ...addon, isAvailable: !addon.isAvailable })}>
+                          {addon.isAvailable ? 'On' : 'Off'}
+                        </Button>
+                      </p>
+                    ))}
+                  </div>
+                ))}
+              </section>
+            </>
+          );
+        }}
+      </ChromeRecords>
 
       <Drawer open={Boolean(editing)} title={editing?.name ?? 'Item'} onClose={() => setEditing(null)}>
         {editing ? (

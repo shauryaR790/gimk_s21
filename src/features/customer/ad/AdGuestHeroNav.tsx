@@ -41,6 +41,7 @@ export function AdGuestHeroNav({
         <Link to={menuHref} className={linkClass('menu')}>
           Refreshments
         </Link>
+        <Link to="/join" className="ad-guest-hero-nav-link">Buy membership</Link>
         <Link to="/member" className="ad-guest-hero-nav-link">Member</Link>
         <Link to="/cart" className={linkClass('cart')} onClick={() => saveMenuScroll()}>
           Cart{cartCount > 0 ? ` (${cartCount})` : ''}

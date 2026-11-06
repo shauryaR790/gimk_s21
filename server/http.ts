@@ -104,7 +104,7 @@ app.use((req, res, next) => {
     next();
     return;
   }
-  express.json({ limit: req.path.startsWith('/api/gym/') ? '2mb' : '256kb' })(req, res, next);
+  express.json({ limit: req.path.startsWith('/api/gym/') || req.path === '/api/portal/join' || req.path === '/api/portal/login' ? '3mb' : '256kb' })(req, res, next);
 });
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');

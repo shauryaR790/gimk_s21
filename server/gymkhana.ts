@@ -1,10 +1,16 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Express, NextFunction, Request, Response } from 'express';
 import { AppError } from './appError';
-import { env, exposeDevOtp, isProduction } from './env';
+import { hashPassword, verifyPassword } from './auth';
+import { env, exposeDevOtp, isProduction, razorpayEnabled } from './env';
 import { CAFE_ID } from './ids';
 import { all, get, run, tx } from './db';
-import { createStaffOrder, markPaid } from './logic';
+import { createStaffOrder, loadCatalog, markPaid, retimeOrder } from './logic';
+import { priceCart } from '../shared/domain';
+import { createRazorpayOrder, publicRazorpayKey, RazorpayError, verifyRazorpayPayment } from './razorpay';
+import { matchActivity, SIGNUP_ACTIVITIES } from '../shared/activities';
+import { normalizeSlots, slotLabel, slotsBetween, summarizeSlots } from '../shared/slots';
+import { TASK_CATEGORIES, TASK_PRIORITIES } from '../shared/maintenance';
 
 export const STAFF_ROLES = [
   'SUPER_ADMIN',
@@ -17,6 +23,7 @@ export const STAFF_ROLES = [
 ] as const;
 
 const OPEN_BOOKING = ['CONFIRMED', 'CHECKED_IN'];
+const BOOKING_STATUSES = ['CONFIRMED', 'CHECKED_IN', 'COMPLETED', 'CANCELLED', 'NO_SHOW'] as const;
 
 type Actor = { id: string; name: string; role: string };
 
@@ -583,13 +590,26 @@ export function getBooking(id: string) {
   return row;
 }
 
-export function updateBooking(id: string, patch: { startAt?: string; facilityId?: string; participants?: number; memberName?: string; memberMobile?: string; notes?: string }, actor: string) {
-  const current = get<{ facility_id: string; start_at: string; end_at: string; status: string; participants: number; member_name: string; member_mobile: string; notes: string }>(
-    'SELECT facility_id, start_at, end_at, status, participants, member_name, member_mobile, notes FROM bookings WHERE id = ? AND cafe_id = ?',
+export function updateBooking(id: string, patch: { startAt?: string; facilityId?: string; participants?: number; memberName?: string; memberMobile?: string; notes?: string; status?: string }, actor: string) {
+  const current = get<{ facility_id: string; start_at: string; end_at: string; status: string; participants: number; member_name: string; member_mobile: string; notes: string; payment_status: string }>(
+    'SELECT facility_id, start_at, end_at, status, participants, member_name, member_mobile, notes, payment_status FROM bookings WHERE id = ? AND cafe_id = ?',
     [id, CAFE_ID],
   );
   if (!current) throw new AppError(404, 'BOOKING', 'Booking not found.');
-  if (!OPEN_BOOKING.includes(current.status)) throw new AppError(409, 'BOOKING', 'This booking can no longer be changed.');
+  const nextStatus = patch.status ? String(patch.status) : current.status;
+  if (patch.status && !BOOKING_STATUSES.includes(nextStatus as (typeof BOOKING_STATUSES)[number])) {
+    throw new AppError(400, 'STATUS', 'Unknown booking status.');
+  }
+  if (nextStatus === 'CANCELLED' && current.payment_status === 'PAID') {
+    throw new AppError(409, 'REFUND', 'Refund the payment before cancelling a paid booking.');
+  }
+  const open = OPEN_BOOKING.includes(current.status) || OPEN_BOOKING.includes(nextStatus);
+  if (!open) {
+    if (!patch.status || nextStatus === current.status) throw new AppError(409, 'BOOKING', 'This booking can no longer be changed.');
+    run('UPDATE bookings SET status = ?, updated_at = ? WHERE id = ?', [nextStatus, nowIso(), id]);
+    audit(actor, nextStatus, 'booking', id, nextStatus);
+    return getBooking(id);
+  }
   const facilityId = patch.facilityId || current.facility_id;
   const facility = get<FacilityRow>('SELECT * FROM facilities WHERE id = ?', [facilityId]);
   if (!facility) throw new AppError(404, 'FACILITY', 'Facility not found.');
@@ -600,17 +620,17 @@ export function updateBooking(id: string, patch: { startAt?: string; facilityId?
   if (patch.memberMobile && !mobile) throw new AppError(400, 'MOBILE', 'Enter a valid 10-digit mobile number.');
   const people = Math.max(1, Math.min(facility.capacity, patch.participants ?? current.participants));
   tx(() => {
-    if (overlaps(facilityId, startAt, endAt, id)) throw new AppError(409, 'OVERLAP', 'That time is already booked.');
+    if (OPEN_BOOKING.includes(nextStatus) && overlaps(facilityId, startAt, endAt, id)) throw new AppError(409, 'OVERLAP', 'That time is already booked.');
     run(
-      'UPDATE bookings SET facility_id = ?, sport = ?, start_at = ?, end_at = ?, participants = ?, member_name = ?, member_mobile = ?, notes = ?, updated_at = ? WHERE id = ?',
-      [facilityId, facility.sport, startAt, endAt, people, patch.memberName?.trim() || current.member_name, mobile ?? '', (patch.notes ?? current.notes ?? '').slice(0, 240), nowIso(), id],
+      'UPDATE bookings SET facility_id = ?, sport = ?, start_at = ?, end_at = ?, participants = ?, member_name = ?, member_mobile = ?, notes = ?, status = ?, updated_at = ? WHERE id = ?',
+      [facilityId, facility.sport, startAt, endAt, people, patch.memberName?.trim() || current.member_name, mobile ?? '', (patch.notes ?? current.notes ?? '').slice(0, 240), nextStatus, nowIso(), id],
     );
   });
-  audit(actor, 'RESCHEDULE', 'booking', id, facility.name);
+  audit(actor, patch.status && nextStatus !== current.status ? nextStatus : 'RESCHEDULE', 'booking', id, facility.name);
   return getBooking(id);
 }
 
-export function setBookingStatus(id: string, status: 'CANCELLED' | 'CHECKED_IN' | 'COMPLETED' | 'NO_SHOW', actor: string) {
+export function setBookingStatus(id: string, status: 'CONFIRMED' | 'CANCELLED' | 'CHECKED_IN' | 'COMPLETED' | 'NO_SHOW', actor: string) {
   const current = get<{ status: string; order_id: string | null; payment_status: string }>('SELECT status, order_id, payment_status FROM bookings WHERE id = ?', [id]);
   if (!current) throw new AppError(404, 'BOOKING', 'Booking not found.');
   if (status === 'CANCELLED' && current.payment_status === 'PAID') {
@@ -1013,6 +1033,28 @@ function istToday() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
+function istDaysAgo(days: number) {
+  return new Date(Date.parse(`${istToday()}T12:00:00+05:30`) - days * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
+function seedOnce(key: string, fn: () => void) {
+  tx(() => {
+    if (Number(run('INSERT OR IGNORE INTO seed_marks (id, created_at) VALUES (?, ?)', [key, nowIso()]).changes) > 0) fn();
+  });
+}
+
+type TaskDetails = { category: string; priority: string; assignedTo: string; cost: number };
+
+function taskDetails(body: Record<string, unknown> | undefined, fallback: TaskDetails): TaskDetails {
+  const category = String(body?.category ?? fallback.category);
+  if (!(TASK_CATEGORIES as readonly string[]).includes(category)) throw new AppError(400, 'MAINTENANCE', 'Choose the kind of work.');
+  const priority = String(body?.priority ?? fallback.priority);
+  if (!TASK_PRIORITIES.some((row) => row.value === priority)) throw new AppError(400, 'MAINTENANCE', 'Choose the priority.');
+  const cost = body?.cost === undefined || body.cost === '' ? fallback.cost : Math.round(Number(body.cost));
+  if (!Number.isFinite(cost) || cost < 0 || cost > 10_000_000) throw new AppError(400, 'MAINTENANCE', 'Enter the cost in rupees.');
+  return { category, priority, assignedTo: String(body?.assignedTo ?? fallback.assignedTo).trim().slice(0, 80), cost };
+}
+
 function saveSessions(shiftId: string, trainerId: string, trainerName: string, sessions: SessionInput[]) {
   const clean = sessions.map((entry, index) => {
     const date = /^\d{4}-\d{2}-\d{2}$/.test(entry.date ?? '') ? entry.date! : istToday();
@@ -1121,6 +1163,7 @@ type TrainerRow = {
   govt_id_url?: string;
   notes: string;
   offers: string;
+  free_slots: string;
 };
 
 function mapTrainer(row: TrainerRow) {
@@ -1136,14 +1179,23 @@ function mapTrainer(row: TrainerRow) {
     govtIdUrl: row.govt_id_url ?? '',
     notes: row.notes ?? '',
     offers: row.offers ?? '',
+    freeSlots: normalizeSlots(row.free_slots),
   };
 }
 
 export function listTrainers() {
   return all<TrainerRow>(
-    'SELECT id, name, phone, email, specialization, availability, is_active, govt_id_label, notes, offers FROM trainers WHERE cafe_id = ? ORDER BY name',
+    'SELECT id, name, phone, email, specialization, availability, is_active, govt_id_label, notes, offers, free_slots FROM trainers WHERE cafe_id = ? ORDER BY name',
     [CAFE_ID],
   ).map(mapTrainer);
+}
+
+function heldSlots(trainerId: string) {
+  return all<{ id: string; name: string; preferred_slot: string }>(
+    `SELECT id, name, preferred_slot FROM join_requests
+     WHERE cafe_id = ? AND trainer_id = ? AND status = 'APPROVED' AND preferred_slot != ''`,
+    [CAFE_ID, trainerId],
+  ).map((row) => ({ slot: row.preferred_slot, name: row.name, requestId: row.id }));
 }
 
 export function trainerProfile(id: string) {
@@ -1153,6 +1205,7 @@ export function trainerProfile(id: string) {
     trainer: mapTrainer(row),
     classes: all('SELECT id, name, category, schedule, duration_minutes, capacity, price FROM gym_classes WHERE trainer_id = ? ORDER BY name', [id]),
     sessions: listTrainerSessions(id),
+    heldSlots: heldSlots(id),
   };
 }
 
@@ -1168,29 +1221,35 @@ export function saveTrainer(input: {
   govtIdUrl?: string;
   notes?: string;
   offers?: string;
+  freeSlots?: unknown;
 }, actor: string) {
   const name = String(input.name ?? '').trim();
   if (name.length < 2) throw new AppError(400, 'NAME', 'Enter the trainer name.');
   const phoneText = String(input.phone ?? '').trim();
   const phone = phoneText ? digits(phoneText) : '';
   if (phoneText && !phone) throw new AppError(400, 'MOBILE', 'Enter a valid 10-digit mobile number.');
+  const current = input.id
+    ? get<{ id: string; free_slots: string }>('SELECT id, free_slots FROM trainers WHERE id = ? AND cafe_id = ?', [input.id, CAFE_ID])
+    : undefined;
+  if (input.id && !current) throw new AppError(404, 'TRAINER', 'Trainer not found.');
+  const slots = input.freeSlots === undefined ? normalizeSlots(current?.free_slots ?? '') : normalizeSlots(input.freeSlots);
+  const availability = slots.length ? summarizeSlots(slots) : String(input.availability ?? '').trim();
   const values = [
     name,
     phone ?? '',
     String(input.email ?? '').trim().slice(0, 120),
     String(input.specialization ?? '').trim().slice(0, 80),
-    String(input.availability ?? '').trim().slice(0, 120),
+    availability.slice(0, 160),
     input.isActive === false ? 0 : 1,
     String(input.govtIdLabel ?? '').trim().slice(0, 80),
     String(input.govtIdUrl ?? '').slice(0, 1_500_000),
     String(input.notes ?? '').slice(0, 2000),
     String(input.offers ?? '').trim().slice(0, 60),
+    JSON.stringify(slots),
   ];
   if (input.id) {
-    const current = get('SELECT id FROM trainers WHERE id = ? AND cafe_id = ?', [input.id, CAFE_ID]);
-    if (!current) throw new AppError(404, 'TRAINER', 'Trainer not found.');
     run(
-      'UPDATE trainers SET name = ?, phone = ?, email = ?, specialization = ?, availability = ?, is_active = ?, govt_id_label = ?, govt_id_url = ?, notes = ?, offers = ? WHERE id = ?',
+      'UPDATE trainers SET name = ?, phone = ?, email = ?, specialization = ?, availability = ?, is_active = ?, govt_id_label = ?, govt_id_url = ?, notes = ?, offers = ?, free_slots = ? WHERE id = ?',
       [...values, input.id],
     );
     audit(actor, 'EDIT_TRAINER', 'trainer', input.id, name);
@@ -1198,12 +1257,539 @@ export function saveTrainer(input: {
   }
   const id = randomUUID();
   run(
-    `INSERT INTO trainers (name, phone, email, specialization, availability, is_active, govt_id_label, govt_id_url, notes, offers, id, cafe_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO trainers (name, phone, email, specialization, availability, is_active, govt_id_label, govt_id_url, notes, offers, free_slots, id, cafe_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [...values, id, CAFE_ID],
   );
   audit(actor, 'ADD_TRAINER', 'trainer', id, name);
   return trainerProfile(id);
+}
+
+export const ID_TYPES = ['Aadhaar', 'PAN', 'Passport', 'Driving licence', 'Voter ID'];
+const JOIN_OPEN = ['NEW', 'CONTACTED'];
+
+type JoinRow = {
+  id: string;
+  ref_no: number;
+  sport: string;
+  name: string;
+  mobile: string;
+  email: string;
+  dob: string;
+  govt_id_label: string;
+  govt_id_url: string;
+  wants_trainer: number;
+  trainer_id: string;
+  preferred_slot: string;
+  plan_id: string;
+  amount: number;
+  payment_status: string;
+  payment_method: string;
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  order_id: string;
+  customer_id: string;
+  status: string;
+  handled_by: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  pincode: string;
+  is_member: number;
+  become_member: number;
+  photo_url: string;
+  password_hash?: string;
+  trainer_name: string | null;
+  trainer_phone: string | null;
+  plan_name: string | null;
+  plan_days: number | null;
+  order_number: number | null;
+};
+
+const JOIN_SELECT = `SELECT r.*, t.name AS trainer_name, t.phone AS trainer_phone, p.name AS plan_name, p.duration_days AS plan_days, o.order_number
+  FROM join_requests r
+  LEFT JOIN trainers t ON t.id = r.trainer_id
+  LEFT JOIN membership_plans p ON p.id = r.plan_id
+  LEFT JOIN orders o ON o.id = r.order_id`;
+
+function joinRef(n: number) {
+  return `GKJ${String(n).padStart(4, '0')}`;
+}
+
+function ageOn(dob: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) return null;
+  const born = new Date(`${dob}T00:00:00+05:30`);
+  if (Number.isNaN(born.getTime())) return null;
+  const today = new Date(`${istToday()}T00:00:00+05:30`);
+  let years = today.getFullYear() - born.getFullYear();
+  const beforeBirthday = today.getMonth() < born.getMonth() || (today.getMonth() === born.getMonth() && today.getDate() < born.getDate());
+  if (beforeBirthday) years -= 1;
+  return years;
+}
+
+function mapJoin(row: JoinRow, withPhoto = false) {
+  return {
+    id: row.id,
+    ref: joinRef(row.ref_no),
+    sport: row.sport,
+    name: row.name,
+    mobile: row.mobile,
+    email: row.email,
+    dob: row.dob,
+    age: ageOn(row.dob),
+    govtIdLabel: row.govt_id_label,
+    govtIdUrl: withPhoto ? row.govt_id_url : '',
+    hasIdPhoto: Boolean(row.govt_id_url),
+    wantsTrainer: row.wants_trainer === 1,
+    route: row.wants_trainer === 1 ? 'TRAINER' : 'STAFF',
+    trainerId: row.trainer_id,
+    trainerName: row.trainer_name ?? '',
+    trainerPhone: row.trainer_phone ?? '',
+    preferredSlot: row.preferred_slot,
+    preferredSlotLabel: row.preferred_slot ? slotLabel(row.preferred_slot) : '',
+    planId: row.plan_id,
+    planName: row.plan_name ?? '',
+    planDays: row.plan_days ?? 0,
+    amount: row.amount,
+    paymentStatus: row.payment_status,
+    paymentMethod: row.payment_method,
+    orderNumber: row.order_number,
+    customerId: row.customer_id,
+    status: row.status,
+    handledBy: row.handled_by,
+    notes: row.notes,
+    pincode: row.pincode ?? '',
+    photoUrl: withPhoto ? row.photo_url ?? '' : '',
+    hasPortrait: Boolean(row.photo_url),
+    hasPassword: Boolean(row.password_hash),
+    isMember: row.is_member === 1,
+    becomeMember: row.become_member === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function joinRow(id: string) {
+  const row = get<JoinRow>(`${JOIN_SELECT} WHERE r.id = ? AND r.cafe_id = ?`, [id, CAFE_ID]);
+  if (!row) throw new AppError(404, 'REQUEST', 'Request not found.');
+  return row;
+}
+
+export function listJoinRequests(route?: string) {
+  const filter = route === 'TRAINER' ? 'AND r.wants_trainer = 1' : route === 'STAFF' ? 'AND r.wants_trainer = 0' : '';
+  return all<JoinRow>(`${JOIN_SELECT} WHERE r.cafe_id = ? ${filter} ORDER BY r.created_at DESC LIMIT 300`, [CAFE_ID]).map((row) => mapJoin(row));
+}
+
+export function getJoinRequest(id: string) {
+  return mapJoin(joinRow(id), true);
+}
+
+function publicJoin(row: JoinRow) {
+  const view = mapJoin(row);
+  return {
+    id: view.id,
+    ref: view.ref,
+    sport: view.sport,
+    firstName: view.name.split(' ')[0] ?? view.name,
+    planName: view.planName,
+    planDays: view.planDays,
+    amount: view.amount,
+    paymentStatus: view.paymentStatus,
+    paymentMethod: view.paymentMethod,
+    status: view.status,
+    wantsTrainer: view.wantsTrainer,
+    trainerName: view.trainerName,
+    preferredSlotLabel: view.preferredSlotLabel,
+    onlinePayment: razorpayEnabled(),
+  };
+}
+
+export function getPublicJoin(id: string) {
+  return publicJoin(joinRow(id));
+}
+
+function planCharge(planId: string) {
+  const catalog = loadCatalog();
+  const quote = priceCart({
+    lines: [{ menuItemId: `gym_item_plan_${planId}`, quantity: 1, addonIds: [] }],
+    items: catalog.items,
+    groups: catalog.addonGroups,
+    taxBps: catalog.cafe.taxBps,
+  });
+  return { subtotal: quote.subtotal, tax: quote.tax, total: quote.total };
+}
+
+function heldSlotSet(trainerId: string, ignoreRequest?: string) {
+  return new Set(heldSlots(trainerId).filter((row) => row.requestId !== ignoreRequest).map((row) => row.slot));
+}
+
+export function joinOptions() {
+  const facilities = listFacilities();
+  const trainers = listTrainers().filter((trainer) => trainer.isActive);
+  const sports = new Map<string, { sport: string; facilities: string[]; trainers: number }>();
+  for (const facility of facilities) {
+    const key = facility.sport.trim();
+    if (!key) continue;
+    const entry = sports.get(key.toLowerCase()) ?? { sport: key, facilities: [], trainers: 0 };
+    entry.facilities.push(facility.name);
+    sports.set(key.toLowerCase(), entry);
+  }
+  for (const trainer of trainers) {
+    const entry = sports.get(trainer.specialization.trim().toLowerCase());
+    if (entry) entry.trainers += 1;
+  }
+  return {
+    activities: [...SIGNUP_ACTIVITIES],
+    sports: [...sports.values()].sort((a, b) => a.sport.localeCompare(b.sport)),
+    plans: listPlans(false).flatMap((plan) => {
+      try {
+        return [{ ...plan, charge: planCharge(plan.id) }];
+      } catch {
+        return [];
+      }
+    }),
+    trainers: trainers.map((trainer) => {
+      const held = heldSlotSet(trainer.id);
+      return {
+        id: trainer.id,
+        name: trainer.name,
+        sport: trainer.specialization,
+        offers: trainer.offers,
+        availability: trainer.availability,
+        freeSlots: trainer.freeSlots.filter((slot) => !held.has(slot)),
+      };
+    }),
+    idTypes: ID_TYPES,
+    onlinePayment: razorpayEnabled(),
+  };
+}
+
+type JoinInput = {
+  signup?: unknown;
+  sport?: unknown;
+  name?: unknown;
+  firstName?: unknown;
+  lastName?: unknown;
+  mobile?: unknown;
+  email?: unknown;
+  dob?: unknown;
+  pincode?: unknown;
+  govtIdType?: unknown;
+  govtIdNumber?: unknown;
+  govtIdLabel?: unknown;
+  govtIdUrl?: unknown;
+  photoUrl?: unknown;
+  passwordHash?: unknown;
+  wantsTrainer?: unknown;
+  trainerId?: unknown;
+  preferredSlot?: unknown;
+  planId?: unknown;
+  isMember?: unknown;
+  becomeMember?: unknown;
+  notes?: unknown;
+};
+
+function text(value: unknown) {
+  return typeof value === 'string' ? value.trim() : value == null ? '' : String(value).trim();
+}
+
+function flag(value: unknown, fallback: boolean) {
+  if (value === undefined) return fallback;
+  return value === true || value === 'true' || value === 1 || value === '1';
+}
+
+function cleanJoin(input: JoinInput, current?: JoinRow) {
+  const signup = input.signup === true || input.signup === 'true';
+  const sportText = text(input.sport ?? current?.sport);
+  const sport = matchActivity(sportText) || listFacilities().find((facility) => facility.sport.trim().toLowerCase() === sportText.toLowerCase())?.sport.trim();
+  if (!sport) throw new AppError(400, 'SPORT', 'Choose an activity.');
+  const firstName = text(input.firstName);
+  const lastName = text(input.lastName);
+  const name = (firstName && lastName ? `${firstName} ${lastName}` : text(input.name ?? current?.name)).replace(/\s+/g, ' ');
+  if (name.length < 2 || name.length > 80) throw new AppError(400, 'NAME', 'Enter your first and last name.');
+  const rawMobile = text(input.mobile ?? current?.mobile);
+  const mobile = rawMobile ? digits(rawMobile) ?? '' : '';
+  if (rawMobile && !mobile) throw new AppError(400, 'MOBILE', 'Enter a valid 10-digit mobile number.');
+  if (!signup && !current && !mobile) throw new AppError(400, 'MOBILE', 'Enter a valid 10-digit mobile number.');
+  const email = text(input.email ?? current?.email).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 120) throw new AppError(400, 'EMAIL', 'Enter a valid email address.');
+  const dob = text(input.dob ?? current?.dob);
+  if (dob) {
+    const age = ageOn(dob);
+    if (age === null || dob >= istToday()) throw new AppError(400, 'DOB', 'Enter your date of birth.');
+    if (age < 3 || age > 100) throw new AppError(400, 'DOB', 'Check the date of birth. Members must be between 3 and 100.');
+  } else if (!signup && !current) {
+    throw new AppError(400, 'DOB', 'Enter your date of birth.');
+  }
+  const pincode = text(input.pincode ?? current?.pincode).replace(/\D/g, '').slice(0, 6);
+  if (pincode && !/^\d{6}$/.test(pincode)) throw new AppError(400, 'PINCODE', 'Enter a 6-digit pincode.');
+  if (signup && !mobile && !/^\d{6}$/.test(pincode)) throw new AppError(400, 'PINCODE', 'Enter a 6-digit pincode.');
+
+  let govtIdLabel = text(input.govtIdLabel ?? '');
+  if (input.govtIdType !== undefined || input.govtIdNumber !== undefined) {
+    const type = ID_TYPES.find((entry) => entry.toLowerCase() === text(input.govtIdType).toLowerCase());
+    if (!type) throw new AppError(400, 'GOVT_ID', 'Choose your government ID type.');
+    const number = text(input.govtIdNumber).replace(/[\s-]/g, '').toUpperCase();
+    if (!/^[A-Z0-9]{4,20}$/.test(number)) throw new AppError(400, 'GOVT_ID', 'Enter your government ID number.');
+    govtIdLabel = type === 'Aadhaar' ? `Aadhaar · ending ${number.slice(-4)}` : `${type} · ${number}`;
+  }
+  if (!govtIdLabel) govtIdLabel = current?.govt_id_label ?? '';
+  let govtIdUrl = current?.govt_id_url ?? '';
+  if (input.govtIdUrl !== undefined) {
+    const url = text(input.govtIdUrl);
+    if (url && (!url.startsWith('data:image/') || url.length > 1_500_000)) throw new AppError(400, 'GOVT_ID', 'Upload the ID as a photo under 1 MB.');
+    govtIdUrl = url;
+  }
+  if (signup && !govtIdUrl) throw new AppError(400, 'GOVT_ID', 'Drop a photo of your government ID.');
+  if (!govtIdLabel) govtIdLabel = govtIdUrl ? 'Government ID photo' : '';
+  if (!govtIdLabel) throw new AppError(400, 'GOVT_ID', 'Enter your government ID.');
+  let photoUrl = current?.photo_url ?? '';
+  if (input.photoUrl !== undefined) {
+    const url = text(input.photoUrl);
+    if (url && (!url.startsWith('data:image/') || url.length > 1_500_000)) throw new AppError(400, 'PHOTO', 'Upload the photograph as a photo under 1 MB.');
+    photoUrl = url;
+  }
+
+  const wantsTrainer = flag(input.wantsTrainer, current?.wants_trainer === 1);
+  let trainerId = '';
+  let preferredSlot = '';
+  if (wantsTrainer) {
+    trainerId = text(input.trainerId ?? current?.trainer_id);
+    preferredSlot = text(input.preferredSlot ?? current?.preferred_slot);
+    if (preferredSlot && !normalizeSlots([preferredSlot]).length) throw new AppError(400, 'SLOT', 'Choose one of the listed times.');
+    if (trainerId) {
+      const trainer = listTrainers().find((row) => row.id === trainerId && row.isActive);
+      if (!trainer) throw new AppError(400, 'TRAINER', 'That trainer is not taking requests. Choose another trainer.');
+      if (preferredSlot && (!trainer.freeSlots.includes(preferredSlot) || heldSlotSet(trainer.id, current?.id).has(preferredSlot))) {
+        throw new AppError(409, 'SLOT', `${trainer.name} is no longer free at ${slotLabel(preferredSlot)}. Choose another time.`);
+      }
+    }
+  }
+
+  const planId = text(input.planId ?? current?.plan_id);
+  let amount = current?.amount ?? 0;
+  if (!planId) {
+    if (!signup && !current) throw new AppError(400, 'PLAN', 'Choose a membership plan.');
+    amount = 0;
+  } else {
+    const plan = get<{ id: string; is_active: number }>('SELECT id, is_active FROM membership_plans WHERE id = ? AND cafe_id = ?', [planId, CAFE_ID]);
+    if (!plan || (plan.is_active !== 1 && planId !== current?.plan_id)) throw new AppError(400, 'PLAN', 'Choose a membership plan.');
+    if (current && current.payment_status !== 'UNPAID' && planId !== current.plan_id) {
+      throw new AppError(409, 'PLAN', 'The plan is already paid for. Decline and refund the request to change it.');
+    }
+    if (!current || current.payment_status === 'UNPAID') {
+      try {
+        amount = planCharge(planId).total;
+      } catch {
+        throw new AppError(409, 'CATALOG', 'This plan is not on the register yet. Ask the desk to add it.');
+      }
+    }
+  }
+  const notes = input.notes === undefined ? current?.notes ?? '' : text(input.notes).slice(0, 2000);
+  const isMember = flag(input.isMember, current?.is_member === 1);
+  const becomeMember = flag(input.becomeMember, current?.become_member === 1);
+  const incomingHash = text(input.passwordHash);
+  const passwordHash = incomingHash.startsWith('scrypt$') ? incomingHash : current?.password_hash ?? '';
+  return { sport, name, mobile, email, dob, pincode, govtIdLabel: govtIdLabel.slice(0, 80), govtIdUrl, photoUrl, wantsTrainer, trainerId, preferredSlot, planId, amount, isMember, becomeMember, notes, passwordHash };
+}
+
+export function createJoinRequest(input: JoinInput, actor = 'Website') {
+  const clean = cleanJoin({ ...input, notes: undefined });
+  const stamp = nowIso();
+  const recent = clean.mobile
+    ? get<JoinRow>(
+      `${JOIN_SELECT} WHERE r.cafe_id = ? AND r.mobile = ? AND r.payment_status = 'UNPAID' AND r.status = 'NEW' AND r.created_at > ? ORDER BY r.created_at DESC LIMIT 1`,
+      [CAFE_ID, clean.mobile, new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()],
+    )
+    : undefined;
+  const id = recent?.id ?? randomUUID();
+  if (recent) {
+    run(
+      `UPDATE join_requests SET sport = ?, name = ?, email = ?, dob = ?, pincode = ?, govt_id_label = ?, govt_id_url = ?, photo_url = ?, password_hash = ?, wants_trainer = ?, trainer_id = ?, preferred_slot = ?, plan_id = ?, amount = ?, is_member = ?, become_member = ?, razorpay_order_id = '', updated_at = ? WHERE id = ?`,
+      [clean.sport, clean.name, clean.email, clean.dob, clean.pincode, clean.govtIdLabel, clean.govtIdUrl, clean.photoUrl, clean.passwordHash, clean.wantsTrainer ? 1 : 0, clean.trainerId, clean.preferredSlot, clean.planId, clean.amount, clean.isMember ? 1 : 0, clean.becomeMember ? 1 : 0, stamp, id],
+    );
+    audit(actor, 'JOIN_UPDATED', 'join', id, 'Applicant changed the request');
+    return getPublicJoin(id);
+  }
+  const ref = (get<{ n: number | null }>('SELECT MAX(ref_no) AS n FROM join_requests WHERE cafe_id = ?', [CAFE_ID])?.n ?? 0) + 1;
+  run(
+    `INSERT INTO join_requests (id, cafe_id, ref_no, sport, name, mobile, email, dob, pincode, govt_id_label, govt_id_url, photo_url, password_hash, wants_trainer, trainer_id, preferred_slot, plan_id, amount, is_member, become_member, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, CAFE_ID, ref, clean.sport, clean.name, clean.mobile, clean.email, clean.dob, clean.pincode, clean.govtIdLabel, clean.govtIdUrl, clean.photoUrl, clean.passwordHash, clean.wantsTrainer ? 1 : 0, clean.trainerId, clean.preferredSlot, clean.planId, clean.amount, clean.isMember ? 1 : 0, clean.becomeMember ? 1 : 0, stamp, stamp],
+  );
+  const row = joinRow(id);
+  const who = clean.wantsTrainer ? (row.trainer_name ? `wants ${row.trainer_name}` : 'wants a trainer') : 'no trainer';
+  audit(actor, 'JOIN_REQUEST', 'join', id, `${row.plan_name ?? 'Plan'} · ${clean.sport} · ${who}`);
+  notify(
+    clean.wantsTrainer ? 'trainers' : 'staff',
+    clean.wantsTrainer ? 'New trainer request' : 'New membership request',
+    `${joinRef(ref)} · ${clean.name} · ${clean.sport} · ${row.plan_name ?? ''} · ${clean.mobile}`,
+  );
+  return publicJoin(row);
+}
+
+export async function startJoinPayment(id: string) {
+  const row = joinRow(id);
+  if (row.payment_status === 'PAID') throw new AppError(409, 'PAYMENT', 'This request is already paid.');
+  if (!JOIN_OPEN.includes(row.status)) throw new AppError(409, 'PAYMENT', 'This request is closed. Contact the desk.');
+  if (!razorpayEnabled()) throw new AppError(503, 'PAYMENTS', 'Online payment is not switched on. Pay at reception.');
+  try {
+    const order = await createRazorpayOrder(row.amount * 100, `join-${joinRef(row.ref_no)}`);
+    run('UPDATE join_requests SET razorpay_order_id = ?, updated_at = ? WHERE id = ?', [order.id, nowIso(), id]);
+    return {
+      requestId: id,
+      amount: order.amount,
+      currency: order.currency,
+      razorpayOrderId: order.id,
+      razorpayKeyId: publicRazorpayKey(),
+      venue: loadCatalog().cafe.name,
+      description: `${row.plan_name ?? 'Membership'} · ${row.sport}`,
+      prefill: { name: row.name, email: row.email, contact: row.mobile },
+    };
+  } catch (error) {
+    if (error instanceof RazorpayError) throw new AppError(503, 'PAYMENTS', error.message);
+    throw error;
+  }
+}
+
+function ensureJoinCustomer(row: JoinRow, actor: string) {
+  const existing = row.customer_id
+    ? get<{ id: string; member_code: string }>('SELECT id, member_code FROM customers WHERE id = ? AND cafe_id = ?', [row.customer_id, CAFE_ID])
+    : row.mobile
+      ? get<{ id: string; member_code: string }>('SELECT id, member_code FROM customers WHERE cafe_id = ? AND mobile = ?', [CAFE_ID, row.mobile])
+      : undefined;
+  const count = get<{ n: number }>('SELECT COUNT(*) AS n FROM customers WHERE cafe_id = ?', [CAFE_ID])?.n ?? 0;
+  const interest = row.wants_trainer === 1 ? `${row.sport} with a trainer` : row.sport;
+  if (existing) {
+    run(
+      `UPDATE customers SET name = ?, email = ?, dob = ?, govt_id_label = ?,
+         photo_url = CASE WHEN ? != '' THEN ? ELSE photo_url END,
+         govt_id_url = CASE WHEN ? != '' THEN ? ELSE govt_id_url END,
+         access_interest = CASE WHEN IFNULL(access_interest, '') = '' THEN ? ELSE access_interest END,
+         coach_id = CASE WHEN ? != '' THEN ? ELSE coach_id END,
+         member_code = CASE WHEN IFNULL(member_code, '') = '' THEN ? ELSE member_code END
+       WHERE id = ?`,
+      [row.name, row.email, row.dob, row.govt_id_label, row.photo_url, row.photo_url, row.govt_id_url, row.govt_id_url, interest, row.trainer_id, row.trainer_id, memberCode(count + 1), existing.id],
+    );
+    return existing.id;
+  }
+  const id = randomUUID();
+  run(
+    `INSERT INTO customers (id, cafe_id, name, mobile, order_count, last_order_at, created_at, email, member_code, membership_status, emergency_contact, photo_url, access_interest, govt_id_label, govt_id_url, coach_id, dob)
+     VALUES (?, ?, ?, ?, 0, NULL, ?, ?, ?, 'PENDING', '', ?, ?, ?, ?, ?, ?)`,
+    [id, CAFE_ID, row.name, row.mobile, nowIso(), row.email, memberCode(count + 1), row.photo_url ?? '', interest, row.govt_id_label, row.govt_id_url, row.trainer_id || null, row.dob],
+  );
+  audit(actor, 'ADD_MEMBER', 'member', id, `${row.name} · from ${joinRef(row.ref_no)}`);
+  return id;
+}
+
+function settleJoin(row: JoinRow, method: 'CASH' | 'UPI' | 'CARD', label: string, paymentId: string, actor: string) {
+  const customerId = ensureJoinCustomer(row, actor);
+  const order = createStaffOrder({
+    customerName: row.name,
+    customerMobile: row.mobile,
+    items: [{ menuItemId: `gym_item_plan_${row.plan_id}`, quantity: 1, addonIds: [] }],
+    notes: `MEMBERSHIP:${row.plan_id} REQUEST:${joinRef(row.ref_no)}`,
+  });
+  markPaid(order.id, method, order.total);
+  run('UPDATE orders SET customer_id = ? WHERE id = ?', [customerId, order.id]);
+  run(
+    `UPDATE join_requests SET payment_status = 'PAID', payment_method = ?, razorpay_payment_id = ?, order_id = ?, customer_id = ?, updated_at = ? WHERE id = ?`,
+    [label, paymentId, order.id, customerId, nowIso(), row.id],
+  );
+  audit(actor, 'JOIN_PAID', 'join', row.id, `${label} · bill ${order.orderNumber ?? ''}`.trim());
+  return customerId;
+}
+
+export function confirmJoinPayment(id: string, razorpayOrderId: string, razorpayPaymentId: string, signature: string) {
+  const row = joinRow(id);
+  if (row.payment_status === 'PAID') {
+    if (row.razorpay_payment_id === razorpayPaymentId) return publicJoin(row);
+    throw new AppError(409, 'PAYMENT', 'This request is already paid.');
+  }
+  if (!row.razorpay_order_id || row.razorpay_order_id !== razorpayOrderId) {
+    throw new AppError(409, 'PAYMENT', 'This payment does not match the request. Start the payment again.');
+  }
+  try {
+    verifyRazorpayPayment(razorpayOrderId, razorpayPaymentId, signature);
+  } catch (error) {
+    if (error instanceof RazorpayError) throw new AppError(422, 'PAYMENTS', error.message);
+    throw error;
+  }
+  tx(() => settleJoin(row, 'UPI', 'Online', razorpayPaymentId, 'Website'));
+  notify(
+    row.wants_trainer === 1 ? 'trainers' : 'staff',
+    'Membership paid online',
+    `${joinRef(row.ref_no)} · ${row.name} paid ₹${row.amount} for ${row.plan_name ?? 'a plan'}`,
+  );
+  return getPublicJoin(id);
+}
+
+export function updateJoinRequest(id: string, input: JoinInput, actor: string) {
+  const current = joinRow(id);
+  if (current.status === 'APPROVED') {
+    run('UPDATE join_requests SET notes = ?, updated_at = ? WHERE id = ?', [text(input.notes ?? current.notes).slice(0, 2000), nowIso(), id]);
+    return getJoinRequest(id);
+  }
+  const clean = cleanJoin(input, current);
+  run(
+    `UPDATE join_requests SET sport = ?, name = ?, mobile = ?, email = ?, dob = ?, pincode = ?, govt_id_label = ?, govt_id_url = ?, photo_url = ?, wants_trainer = ?, trainer_id = ?, preferred_slot = ?, plan_id = ?, amount = ?, is_member = ?, become_member = ?, notes = ?, updated_at = ? WHERE id = ?`,
+    [clean.sport, clean.name, clean.mobile, clean.email, clean.dob, clean.pincode, clean.govtIdLabel, clean.govtIdUrl, clean.photoUrl, clean.wantsTrainer ? 1 : 0, clean.trainerId, clean.preferredSlot, clean.planId, clean.amount, clean.isMember ? 1 : 0, clean.becomeMember ? 1 : 0, clean.notes, nowIso(), id],
+  );
+  if (clean.planId !== current.plan_id) run(`UPDATE join_requests SET razorpay_order_id = '' WHERE id = ?`, [id]);
+  audit(actor, 'JOIN_EDIT', 'join', id, 'Details updated');
+  return getJoinRequest(id);
+}
+
+export function markJoinContacted(id: string, actor: string) {
+  const row = joinRow(id);
+  if (!JOIN_OPEN.includes(row.status)) throw new AppError(409, 'REQUEST', 'This request is already closed.');
+  run(`UPDATE join_requests SET status = 'CONTACTED', handled_by = ?, updated_at = ? WHERE id = ?`, [actor, nowIso(), id]);
+  audit(actor, 'JOIN_CONTACTED', 'join', id, row.mobile);
+  return getJoinRequest(id);
+}
+
+export function approveJoinRequest(id: string, method: string | undefined, actor: string, notes?: string) {
+  const row = joinRow(id);
+  if (!JOIN_OPEN.includes(row.status)) throw new AppError(409, 'REQUEST', 'This request is already closed.');
+  if (row.wants_trainer === 1 && !row.trainer_id) throw new AppError(400, 'TRAINER', 'Choose a trainer before approving.');
+  if (!row.plan_id) throw new AppError(400, 'PLAN', 'Choose a membership plan before approving.');
+  if (!row.mobile) throw new AppError(400, 'MOBILE', 'Enter a phone number before approving.');
+  if (row.wants_trainer === 1 && row.preferred_slot && heldSlotSet(row.trainer_id, row.id).has(row.preferred_slot)) {
+    throw new AppError(409, 'SLOT', `${row.trainer_name ?? 'The trainer'} already has someone at ${slotLabel(row.preferred_slot)}. Pick another time first.`);
+  }
+  const pay = method === 'CASH' || method === 'UPI' || method === 'CARD' ? method : null;
+  if (row.payment_status !== 'PAID' && !pay) throw new AppError(400, 'PAYMENT', 'Choose how the payment was taken: cash, UPI, or card.');
+  tx(() => {
+    const customerId = row.payment_status === 'PAID'
+      ? ensureJoinCustomer(row, actor)
+      : settleJoin(row, pay!, pay === 'CASH' ? 'Cash' : pay === 'UPI' ? 'UPI' : 'Card', '', actor);
+    assignPlan(customerId, row.plan_id, actor);
+    if (row.trainer_id) run('UPDATE customers SET coach_id = ? WHERE id = ?', [row.trainer_id, customerId]);
+    run(`UPDATE join_requests SET status = 'APPROVED', customer_id = ?, handled_by = ?, notes = COALESCE(?, notes), updated_at = ? WHERE id = ?`, [customerId, actor, notes === undefined ? null : notes.slice(0, 2000), nowIso(), id]);
+  });
+  audit(actor, 'JOIN_APPROVED', 'join', id, `${row.plan_name ?? 'Plan'} is active`);
+  return getJoinRequest(id);
+}
+
+export function declineJoinRequest(id: string, reason: string, actor: string, notes?: string) {
+  const row = joinRow(id);
+  if (row.status === 'APPROVED') throw new AppError(409, 'REQUEST', 'This request is approved. Change the membership from the visitor record.');
+  if (row.status === 'DECLINED') throw new AppError(409, 'REQUEST', 'This request is already declined.');
+  tx(() => {
+    if (row.payment_status === 'PAID' && row.order_id) {
+      run(
+        'INSERT INTO payments (id, order_id, method, amount, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [randomUUID(), row.order_id, 'OTHER', row.amount, 'REFUNDED', nowIso()],
+      );
+      run(`UPDATE orders SET payment_status = 'REFUNDED', updated_at = ? WHERE id = ?`, [nowIso(), row.order_id]);
+      run(`UPDATE join_requests SET payment_status = 'REFUNDED' WHERE id = ?`, [id]);
+    }
+    run(`UPDATE join_requests SET status = 'DECLINED', handled_by = ?, notes = COALESCE(?, notes), updated_at = ? WHERE id = ?`, [actor, notes === undefined ? null : notes.slice(0, 2000), nowIso(), id]);
+  });
+  const refund = row.payment_status === 'PAID' ? ' Refund recorded on the bill. Razorpay is not refunded automatically, so send it from the Razorpay dashboard.' : '';
+  audit(actor, 'JOIN_DECLINED', 'join', id, `${reason.trim().slice(0, 200) || 'Declined'}.${refund}`);
+  return { request: getJoinRequest(id), note: refund.trim() };
 }
 
 function ensureCategory(id: string, name: string, sort: number) {
@@ -1250,12 +1836,16 @@ export function seedGymkhana() {
   }
   const facilities = [
     ['fac_badminton', 'Badminton Court 1', 'Badminton', 'Indoor hall', 4, 400, 600, 'BOOKING'],
+    ['fac_badminton_2', 'Badminton Court 2', 'Badminton', 'Indoor hall', 4, 400, 600, 'BOOKING'],
     ['fac_tennis', 'Tennis Court 1', 'Tennis', 'Outdoor', 4, 700, 1000, 'BOOKING'],
-    ['fac_pool', 'Swimming Pool', 'Swimming', 'Pool deck', 30, 200, 350, 'EITHER'],
-    ['fac_basketball', 'Basketball Court', 'Basketball', 'Main court', 10, 800, 1200, 'BOOKING'],
+    ['fac_pool', 'Swimming C1', 'Swimming', 'Pool deck', 30, 200, 350, 'EITHER'],
+    ['fac_pool_2', 'Swimming C2', 'Swimming', 'Pool deck', 30, 200, 350, 'EITHER'],
+    ['fac_basketball', 'Basketball C1', 'Basketball', 'Main court', 10, 800, 1200, 'BOOKING'],
+    ['fac_basketball_2', 'Basketball C2', 'Basketball', 'Main court', 10, 800, 1200, 'BOOKING'],
     ['fac_squash', 'Squash Court', 'Squash', 'Indoor', 2, 350, 500, 'BOOKING'],
     ['fac_gym', 'Gym', 'Fitness', 'Strength floor', 40, 0, 150, 'MEMBERSHIP'],
-    ['fac_football', 'Football Ground', 'Football', 'Field', 22, 2500, 4000, 'BOOKING'],
+    ['fac_football', 'Football C1', 'Football', 'Field', 22, 2500, 4000, 'BOOKING'],
+    ['fac_football_2', 'Football C2', 'Football', 'Field', 22, 2500, 4000, 'BOOKING'],
   ] as const;
   for (const [id, name, sport, location, capacity, memberPrice, guestPrice, access] of facilities) {
     run(
@@ -1264,6 +1854,11 @@ export function seedGymkhana() {
       [id, CAFE_ID, name, sport, location, `${name} at Gymkhana`, capacity, memberPrice, guestPrice, access, nowIso()],
     );
   }
+  run(`UPDATE facilities SET name = 'Football C1' WHERE id = 'fac_football' AND name = 'Football Ground'`);
+  run(`UPDATE facilities SET name = 'Basketball C1' WHERE id = 'fac_basketball' AND name = 'Basketball Court'`);
+  run(`UPDATE facilities SET name = 'Swimming C1' WHERE id = 'fac_pool' AND name = 'Swimming Pool'`);
+  run(`UPDATE check_ins SET facility_name = 'Football C1' WHERE facility_name = 'Football Ground'`);
+  run(`UPDATE check_ins SET facility_name = 'Swimming C1' WHERE facility_name = 'Swimming Pool'`);
   const plans = [
     ['plan_monthly', 'Monthly', 30, 2500, 'Court and gym access for 30 days.', 500, 1, 0],
     ['plan_quarterly', 'Quarterly', 90, 6500, 'Three months of member pricing.', 800, 2, 7],
@@ -1326,15 +1921,26 @@ export function seedGymkhana() {
     ['trainer_head', 'Neha Kapoor', '9810000001', 'neha.kapoor@gymkhana.local', 'Badminton', 'Mon–Sat 06:00–11:00'],
     ['trainer_arjun', 'Arjun Desai', '9810000002', 'arjun.desai@gymkhana.local', 'Tennis', 'Tue–Sun 07:00–12:00'],
     ['trainer_farah', 'Farah Khan', '9810000003', 'farah.khan@gymkhana.local', 'Swimming', 'Mon–Fri 06:30–10:00'],
-    ['trainer_imran', 'Imran Qureshi', '9810000004', 'imran.qureshi@gymkhana.local', 'Football', 'Mon–Sat 16:00–20:00'],
+    ['trainer_imran', 'Kabir Patel', '9810000004', 'kabir.patel@gymkhana.local', 'Football', 'Mon–Sat 16:00–20:00'],
   ];
+  const seedSlots: Record<string, string[]> = {
+    trainer_head: slotsBetween(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], 6, 11),
+    trainer_arjun: slotsBetween(['Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], 7, 12),
+    trainer_farah: slotsBetween(['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], 6, 10),
+    trainer_imran: slotsBetween(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], 16, 20),
+  };
   for (const [id, name, phone, email, sport, hours] of trainers) {
     run(
       `INSERT OR IGNORE INTO trainers (id, cafe_id, name, phone, specialization, availability, is_active, email) VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
       [id, CAFE_ID, name, phone, sport, hours, email],
     );
-    run('UPDATE trainers SET name = ?, phone = ?, email = ?, specialization = ?, availability = ? WHERE id = ?', [name, phone, email, sport, hours, id]);
+    run('UPDATE trainers SET name = ?, phone = ?, email = ?, specialization = ? WHERE id = ?', [name, phone, email, sport, id]);
+    const slots = seedSlots[id] ?? [];
+    run(`UPDATE trainers SET free_slots = ?, availability = ? WHERE id = ? AND free_slots = ''`, [JSON.stringify(slots), summarizeSlots(slots), id]);
   }
+  run(`UPDATE trainer_sessions SET trainer_name = 'Kabir Patel' WHERE trainer_id = 'trainer_imran'`);
+  run(`UPDATE desk_shifts SET subject_name = 'Kabir Patel', email = 'kabir.patel@gymkhana.local' WHERE subject_id = 'trainer_imran'`);
+  run(`UPDATE maintenance_records SET actor = 'Kabir Patel' WHERE actor = 'Imran Qureshi'`);
   run(
     `INSERT OR IGNORE INTO gym_classes (id, cafe_id, name, category, trainer_id, schedule, duration_minutes, capacity, price, description, is_private, is_active)
      VALUES ('class_badminton', ?, 'Morning badminton', 'Badminton', 'trainer_head', 'Mon Wed Fri 07:00', 60, 8, 400, 'Group drills', 0, 1)`,
@@ -1383,10 +1989,36 @@ export function seedGymkhana() {
      VALUES ('book_demo_tennis', ?, 'fac_tennis', 'visitor_meera', 'Meera Shah', '9811111113', 'Tennis', ?, ?, 2, 700, 0, 'PAID', 'CONFIRMED', 'UPI', NULL, 'Member court', ?, ?, 'Reception')`,
     [CAFE_ID, new Date(`${day}T07:00:00+05:30`).toISOString(), new Date(`${day}T08:00:00+05:30`).toISOString(), nowIso(), nowIso()],
   );
+  const tomorrow = new Date(Date.parse(`${day}T12:00:00+05:30`) + 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const ashaId = get<{ id: string }>('SELECT id FROM customers WHERE cafe_id = ? AND mobile = ?', [CAFE_ID, '9811111111'])?.id ?? 'member_demo';
+  const extraBookings: [string, string, string, string, string, string, string, number, number, number, string, string, string, string][] = [
+    ['book_demo_squash', day, 'visitor_meera', 'fac_squash', 'Meera Shah', '9811111113', 'Squash', 9, 1, 500, 'PAID', 'CHECKED_IN', 'UPI', 'Morning squash'],
+    ['book_demo_pool', day, 'visitor_leela', 'fac_pool', 'Leela Nair', '9811111115', 'Swimming', 11, 1, 400, 'PAID', 'CHECKED_IN', 'CASH', 'Lane hire'],
+    ['book_demo_bball', day, 'visitor_kabir', 'fac_basketball', 'Kabir Das', '9811111114', 'Basketball', 16, 1, 800, 'UNPAID', 'CONFIRMED', '', 'Hall booking'],
+    ['book_demo_football', day, 'visitor_kabir', 'fac_football', 'Kabir Das', '9811111114', 'Football', 17, 1, 2000, 'PAID', 'CONFIRMED', 'CARD', 'Evening ground'],
+    ['book_demo_gym', day, ashaId, 'fac_gym', 'Asha Menon', '9811111111', 'Gym', 8, 2, 0, 'PAID', 'CHECKED_IN', 'CASH', 'Member gym floor'],
+    ['book_demo_tennis_pm', day, 'visitor_meera', 'fac_tennis', 'Meera Shah', '9811111113', 'Tennis', 16, 1, 700, 'PAID', 'CONFIRMED', 'UPI', 'Afternoon court'],
+    ['book_demo_badminton_pm', day, ashaId, 'fac_badminton_2', 'Asha Menon', '9811111111', 'Badminton', 19, 1, 600, 'UNPAID', 'CONFIRMED', '', 'Night slot'],
+    ['book_demo_yoga', day, 'visitor_leela', 'fac_pool_2', 'Leela Nair', '9811111115', 'Swimming', 7, 1, 350, 'PAID', 'COMPLETED', 'UPI', 'Sunrise lane'],
+    ['book_demo_cancelled', day, 'visitor_rahul', 'fac_tennis', 'Rahul Iyer', '9811111112', 'Tennis', 12, 1, 700, 'UNPAID', 'CANCELLED', '', 'Guest cancelled'],
+    ['book_demo_yday_tennis', istDaysAgo(1), 'visitor_meera', 'fac_tennis', 'Meera Shah', '9811111113', 'Tennis', 7, 1, 700, 'PAID', 'COMPLETED', 'UPI', 'Yesterday court'],
+    ['book_demo_yday_badminton', istDaysAgo(1), 'visitor_rahul', 'fac_badminton', 'Rahul Iyer', '9811111112', 'Badminton', 18, 1, 600, 'PAID', 'COMPLETED', 'CASH', 'Yesterday evening'],
+    ['book_demo_tomorrow', tomorrow, ashaId, 'fac_badminton', 'Asha Menon', '9811111111', 'Badminton', 18, 1, 600, 'UNPAID', 'CONFIRMED', '', 'Hold for tomorrow'],
+  ];
+  for (const [id, date, customerId, facilityId, name, mobile, sport, hour, hours, amount, pay, status, method, notes] of extraBookings) {
+    if (!get('SELECT id FROM facilities WHERE id = ?', [facilityId])) continue;
+    const startAt = new Date(`${date}T${String(hour).padStart(2, '0')}:00:00+05:30`).toISOString();
+    const endAt = new Date(`${date}T${String(hour + hours).padStart(2, '0')}:00:00+05:30`).toISOString();
+    run(
+      `INSERT OR IGNORE INTO bookings (id, cafe_id, facility_id, customer_id, member_name, member_mobile, sport, start_at, end_at, participants, amount, discount, payment_status, status, payment_method, order_id, notes, created_at, updated_at, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 2, ?, 0, ?, ?, ?, NULL, ?, ?, ?, 'Reception')`,
+      [id, CAFE_ID, facilityId, customerId, name, mobile, sport, startAt, endAt, amount, pay, status, method, notes, startAt, startAt],
+    );
+  }
   const inside: [string, string, string, string, string][] = [
     ['cin_rahul', 'visitor_rahul', 'Rahul Iyer', 'Badminton Court 1', 'VISITOR'],
-    ['cin_kabir', 'visitor_kabir', 'Kabir Das', 'Football Ground', 'VISITOR'],
-    ['cin_leela', 'visitor_leela', 'Leela Nair', 'Swimming Pool', 'MEMBER'],
+    ['cin_kabir', 'visitor_kabir', 'Kabir Das', 'Football C1', 'VISITOR'],
+    ['cin_leela', 'visitor_leela', 'Leela Nair', 'Swimming C1', 'MEMBER'],
   ];
   for (const [id, customerId, name, facility, kind] of inside) {
     run(
@@ -1429,6 +2061,195 @@ export function seedGymkhana() {
        VALUES (?, ?, 'shift_demo_neha', 'trainer_head', 'Neha Kapoor', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, CAFE_ID, shiftDay, start, minutes, facility, activity, kind, people, visitors, amount, payment, shiftEnd],
     );
+  }
+  const trainerById = new Map(trainers.map(([id, name, phone, email]) => [id, { name, phone, email }]));
+  type DemoSession = [string, number, string, string, string, number, string, number, string];
+  const demoShifts: [string, string, number, string, string, string, string, DemoSession[]][] = [
+    ['shift_demo_farah_0', 'trainer_farah', 0, '06:00', '10:00', 'Swim coach', 'Pool block before school hours.', [
+      ['06:30', 45, 'Swimming Pool', 'Lane swimming', 'Group class', 8, 'Leela Nair and 7 members', 0, 'Included in plan'],
+      ['07:30', 45, 'Swimming Pool', 'Freestyle breathing', 'Private coaching', 1, 'Leela Nair', 600, 'Paid · Cash'],
+      ['08:30', 30, 'Swimming Pool', 'Swim test for new juniors', 'Assessment', 3, 'Three juniors from the waitlist', 0, 'Included in plan'],
+    ]],
+    ['shift_demo_neha_1', 'trainer_head', 1, '06:00', '11:00', 'Head trainer', 'Private lessons and trials.', [
+      ['07:00', 60, 'Badminton Court 1', 'Serve and return', 'Private coaching', 1, 'Asha Menon', 1200, 'Paid · Card'],
+      ['08:30', 30, 'Badminton Court 1', 'Trial for new players', 'Assessment', 3, 'Walk-in trial players', 0, 'Included in plan'],
+      ['09:30', 60, 'Badminton Court 1', 'Doubles rotation', 'Group class', 6, 'Rahul Iyer and 5 members', 0, 'Included in plan'],
+    ]],
+    ['shift_demo_arjun_1', 'trainer_arjun', 1, '07:00', '12:00', 'Trainer', 'Footwork class and private hours.', [
+      ['07:30', 60, 'Tennis Court 1', 'Tennis footwork', 'Group class', 5, 'Meera Shah and 4 members', 0, 'Included in plan'],
+      ['09:00', 60, 'Tennis Court 1', 'Backhand clinic', 'Private coaching', 1, 'Meera Shah', 1500, 'Paid · UPI'],
+      ['10:30', 60, 'Tennis Court 1', 'Junior tennis camp', 'Camp', 10, 'Under-12 camp group', 2000, 'Paid · Cash'],
+    ]],
+    ['shift_demo_imran_1', 'trainer_imran', 1, '16:00', '20:00', 'Trainer', 'Evening squad training.', [
+      ['16:30', 90, 'Football Ground', 'U-14 squad practice', 'Team practice', 18, 'U-14 squad', 0, 'Included in plan'],
+      ['18:30', 60, 'Football Ground', 'Striker finishing', 'Private coaching', 1, 'Kabir Das', 1000, 'Paid · UPI'],
+    ]],
+    ['shift_demo_neha_2', 'trainer_head', 2, '06:00', '11:00', 'Head trainer', 'Morning badminton block.', [
+      ['07:00', 60, 'Badminton Court 1', 'Morning badminton', 'Group class', 7, 'Asha Menon, Rahul Iyer and 5 juniors', 0, 'Included in plan'],
+      ['09:00', 45, 'Badminton Court 1', 'Smash and net play', 'Private coaching', 1, 'Rahul Iyer', 800, 'Due'],
+    ]],
+    ['shift_demo_farah_2', 'trainer_farah', 2, '06:00', '10:00', 'Swim coach', 'Lane training.', [
+      ['06:30', 45, 'Swimming Pool', 'Lane swimming', 'Group class', 9, 'Leela Nair and 8 members', 0, 'Included in plan'],
+      ['07:30', 45, 'Swimming Pool', 'Backstroke turns', 'Private coaching', 1, 'Leela Nair', 600, 'Paid · UPI'],
+    ]],
+    ['shift_demo_imran_2', 'trainer_imran', 2, '16:00', '20:00', 'Trainer', 'Senior team night.', [
+      ['17:00', 120, 'Football Ground', 'Senior team practice', 'Team practice', 20, 'Senior team', 0, 'Included in plan'],
+    ]],
+    ['shift_demo_arjun_3', 'trainer_arjun', 3, '07:00', '12:00', 'Trainer', 'Footwork class.', [
+      ['07:30', 60, 'Tennis Court 1', 'Tennis footwork', 'Group class', 6, 'Meera Shah and 5 members', 0, 'Included in plan'],
+      ['10:00', 60, 'Tennis Court 1', 'First serve', 'Private coaching', 1, 'Meera Shah', 1500, 'Due'],
+    ]],
+    ['shift_demo_imran_3', 'trainer_imran', 3, '16:00', '20:00', 'Trainer', 'Fitness block.', [
+      ['16:30', 60, 'Football Ground', 'Football fitness', 'Group class', 12, 'Open fitness group', 0, 'Included in plan'],
+      ['18:00', 45, 'Football Ground', 'Goalkeeper drills', 'Private coaching', 2, 'Kabir Das and a friend', 1200, 'Paid · Cash'],
+    ]],
+    ['shift_demo_neha_4', 'trainer_head', 4, '06:00', '11:00', 'Head trainer', 'Morning badminton block.', [
+      ['07:00', 60, 'Badminton Court 1', 'Morning badminton', 'Group class', 8, 'Full class', 0, 'Included in plan'],
+      ['08:30', 60, 'Badminton Court 1', 'Footwork ladder', 'Private coaching', 1, 'Asha Menon', 1200, 'Paid · UPI'],
+    ]],
+  ];
+  seedOnce('demo_sessions_week', () => {
+    for (const [id, trainerId, daysAgo, from, to, roleLabel, notes, sessions] of demoShifts) {
+      const trainer = trainerById.get(trainerId);
+      if (!trainer) continue;
+      const date = istDaysAgo(daysAgo);
+      const endedAt = new Date(`${date}T${to}:00+05:30`).toISOString();
+      run(
+        `INSERT OR IGNORE INTO desk_shifts (id, cafe_id, subject_type, subject_id, subject_name, started_at, ended_at, phone, email, role_label, govt_id_label, govt_id_url, areas, notes, opened_by)
+         VALUES (?, ?, 'TRAINER', ?, ?, ?, ?, ?, ?, ?, '', '', 'Coaching', ?, 'seed')`,
+        [id, CAFE_ID, trainerId, trainer.name, new Date(`${date}T${from}:00+05:30`).toISOString(), endedAt, trainer.phone, trainer.email, roleLabel, notes],
+      );
+      sessions.forEach(([start, minutes, facility, activity, kind, people, visitors, amount, payment], index) => {
+        run(
+          `INSERT OR IGNORE INTO trainer_sessions (id, cafe_id, shift_id, trainer_id, trainer_name, session_date, start_time, duration_minutes, facility, activity, kind, participants, visitors, amount, payment, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [`${id}_${index + 1}`, CAFE_ID, id, trainerId, trainer.name, date, start, minutes, facility, activity, kind, people, visitors, amount, payment, endedAt],
+        );
+      });
+    }
+  });
+  const demoTasks: [string, string, string, string, number, number | null, string, string, string, string, number][] = [
+    ['mnt_badminton_mop', 'fac_badminton', 'Mop court before evening play', 'Dust on court 1 after the morning session.', 0, 0, 'Neha Kapoor', 'Cleaning', 'LOW', 'Housekeeping', 0],
+    ['mnt_basket_lights', 'fac_basketball', 'Replace two floodlights', 'North end lights flicker after 19:00.', 1, null, 'Facility Manager', 'Electrical', 'URGENT', 'Ravi, electrician', 0],
+    ['mnt_gym_treadmill', 'fac_gym', 'Service treadmill 3', 'Belt slips at speed 10. Keep it out of use until serviced.', 2, null, 'Reception', 'Equipment', 'HIGH', 'FitCare service', 0],
+    ['mnt_pool_shower', 'fac_pool', 'Fix leaking shower', 'Second shower in the ladies changing room drips.', 3, null, 'Farah Khan', 'Plumbing', 'NORMAL', 'Plumber on call', 0],
+    ['mnt_football_goal', 'fac_football', 'Fix goal net hooks', 'Three hooks broken on the east goal.', 4, 3, 'Kabir Patel', 'Repair', 'NORMAL', 'Ground staff', 350],
+    ['mnt_pool_ph', 'fac_pool', 'Balance pool pH', 'Morning test read 7.9. Dose and retest before the lane class.', 6, 6, 'Farah Khan', 'Inspection', 'HIGH', 'Pool plant team', 450],
+    ['mnt_squash_floor', 'fac_squash', 'Deep clean squash floor', 'Scuff marks around the service box.', 9, 8, 'Reception', 'Cleaning', 'LOW', 'Housekeeping', 600],
+    ['mnt_tennis_lines', 'fac_tennis', 'Repaint baselines', 'Baseline paint has worn at both ends.', 12, 10, 'Facility Manager', 'Repair', 'NORMAL', 'Suresh Painters', 3800],
+    ['mnt_gym_firstaid', 'fac_gym', 'Restock first aid kit', 'Check expiry dates and refill bandages and spray.', 15, 15, 'Facility Manager', 'Safety', 'NORMAL', 'Reception', 900],
+    ['mnt_fire_check', 'fac_basketball', 'Monthly fire extinguisher check', 'Hall and corridor extinguishers, sign the tags.', 20, 20, 'Facility Manager', 'Safety', 'NORMAL', 'City Fire Safety', 1200],
+  ];
+  seedOnce('demo_maintenance', () => {
+    run(`UPDATE maintenance_records SET category = 'Repair', priority = 'HIGH', assigned_to = 'Ground staff' WHERE id = 'mnt_net'`);
+    for (const [id, facilityId, title, notes, startedAgo, endedAgo, raisedBy, category, priority, assignedTo, cost] of demoTasks) {
+      const startedAt = new Date(`${istDaysAgo(startedAgo)}T07:15:00+05:30`).toISOString();
+      const endedAt = endedAgo === null ? null : new Date(`${istDaysAgo(endedAgo)}T${endedAgo === startedAgo ? '09:30' : '16:00'}:00+05:30`).toISOString();
+      run(
+        `INSERT OR IGNORE INTO maintenance_records (id, cafe_id, facility_id, title, notes, status, starts_at, ends_at, created_at, actor, category, priority, assigned_to, cost)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, CAFE_ID, facilityId, title, notes, endedAt ? 'CLOSED' : 'OPEN', startedAt, endedAt, startedAt, raisedBy, category, priority, assignedTo, cost],
+      );
+    }
+  });
+  const demoParticipants: [string, string, string, string, string][] = [
+    ['reg_demo_1', 'class_badminton', 'Asha Menon', '9811111111', 'REGISTERED'],
+    ['reg_demo_2', 'class_badminton', 'Rahul Iyer', '9811111112', 'ATTENDED'],
+    ['reg_demo_3', 'class_badminton', 'Dev Arora', '', 'REGISTERED'],
+    ['reg_demo_4', 'class_tennis', 'Meera Shah', '9811111113', 'ATTENDED'],
+    ['reg_demo_5', 'class_tennis', 'Ishaan Kapoor', '', 'REGISTERED'],
+    ['reg_demo_6', 'class_swim', 'Leela Nair', '9811111115', 'REGISTERED'],
+    ['reg_demo_7', 'class_swim', 'Tara Menon', '', 'REGISTERED'],
+  ];
+  seedOnce('demo_participants', () => {
+    demoParticipants.forEach(([id, classId, name, mobile, status], index) => {
+      if (!get('SELECT id FROM gym_classes WHERE id = ?', [classId])) return;
+      const customer = mobile ? get<{ id: string }>('SELECT id FROM customers WHERE cafe_id = ? AND mobile = ?', [CAFE_ID, mobile]) : undefined;
+      run(
+        'INSERT OR IGNORE INTO class_registrations (id, class_id, customer_id, name, status, attended, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [id, classId, customer?.id ?? null, name, status, status === 'ATTENDED' ? 1 : 0, new Date(Date.now() - (index + 1) * 3_600_000).toISOString()],
+      );
+    });
+  });
+  seedClubDeskSales();
+}
+
+function seedClubDeskSales() {
+  if (get('SELECT id FROM seed_marks WHERE id = ?', ['demo_club_sales'])) return;
+  run('INSERT INTO seed_marks (id, created_at) VALUES (?, ?)', ['demo_club_sales', nowIso()]);
+
+  run(`INSERT OR IGNORE INTO pos_configs (id, cafe_id, name, is_restaurant) VALUES ('pos_config_restaurant', ?, 'Gymkhana', 1)`, [CAFE_ID]);
+  if (!get("SELECT id FROM pos_sessions WHERE status = 'OPEN' LIMIT 1")) {
+    const config = get<{ id: string }>('SELECT id FROM pos_configs LIMIT 1');
+    if (config) {
+      const seq = get<{ n: number }>(
+        'SELECT COALESCE(MAX(sequence), 0) + 1 AS n FROM pos_sessions WHERE config_id = ?',
+        [config.id],
+      );
+      run(
+        `INSERT INTO pos_sessions (id, config_id, status, opened_at, closed_at, opened_by, opening_cash, closing_cash, counted_cash, notes, sequence)
+         VALUES ('ps_demo_open', ?, 'OPEN', ?, NULL, 'Reception', 500000, NULL, NULL, 'Front desk till', ?)`,
+        [config.id, new Date(`${istToday()}T06:00:00+05:30`).toISOString(), seq?.n ?? 1],
+      );
+    }
+  }
+
+  const sales: [string, number, number, number, string, string, string, '' | 'CASH' | 'UPI' | 'CARD', string][] = [
+    ['sale_demo_t01', 0, 7, 12, 'Asha Menon', '9811111111', 'gym_item_fac_badminton', 'CASH', 'BOOKING:book_demo_gym'],
+    ['sale_demo_t02', 0, 7, 48, 'Meera Shah', '9811111113', 'gym_item_fac_tennis', 'UPI', 'BOOKING:book_demo_tennis'],
+    ['sale_demo_t03', 0, 8, 10, 'Kabir Das', '9811111114', 'gym_item_day_pass', 'CASH', ''],
+    ['sale_demo_t04', 0, 8, 40, 'Leela Nair', '9811111115', 'gym_item_class', 'CARD', ''],
+    ['sale_demo_t05', 0, 9, 5, 'Rahul Iyer', '9811111112', 'gym_item_coaching', 'UPI', ''],
+    ['sale_demo_t06', 0, 9, 35, 'Meera Shah', '9811111113', 'gym_item_fac_squash', 'UPI', 'BOOKING:book_demo_squash'],
+    ['sale_demo_t07', 0, 10, 20, 'Asha Menon', '9811111111', 'gym_item_racket', 'CASH', ''],
+    ['sale_demo_t08', 0, 11, 5, 'Leela Nair', '9811111115', 'gym_item_fac_pool', 'CASH', 'BOOKING:book_demo_pool'],
+    ['sale_demo_t09', 0, 12, 15, 'Walk-in', '9820000101', 'gym_item_fac_basketball', '', ''],
+    ['sale_demo_t10', 0, 16, 10, 'Kabir Das', '9811111114', 'gym_item_fac_football', 'CARD', 'BOOKING:book_demo_football'],
+    ['sale_demo_t11', 0, 16, 42, 'Meera Shah', '9811111113', 'gym_item_plan_plan_monthly', 'UPI', 'MEMBERSHIP:plan_monthly'],
+    ['sale_demo_t12', 0, 17, 20, 'Rahul Iyer', '9811111112', 'gym_item_shirt', 'CASH', ''],
+    ['sale_demo_t13', 0, 18, 5, 'Asha Menon', '9811111111', 'gym_item_fac_badminton', 'UPI', 'BOOKING:book_demo_badminton'],
+    ['sale_demo_d1a', 1, 7, 20, 'Meera Shah', '9811111113', 'gym_item_fac_tennis', 'UPI', 'BOOKING:book_demo_yday_tennis'],
+    ['sale_demo_d1b', 1, 18, 10, 'Rahul Iyer', '9811111112', 'gym_item_fac_badminton', 'CASH', 'BOOKING:book_demo_yday_badminton'],
+    ['sale_demo_d1c', 1, 19, 5, 'Asha Menon', '9811111111', 'gym_item_class', 'CARD', ''],
+    ['sale_demo_d2a', 2, 8, 0, 'Leela Nair', '9811111115', 'gym_item_fac_pool', 'UPI', ''],
+    ['sale_demo_d2b', 2, 17, 30, 'Kabir Das', '9811111114', 'gym_item_coaching', 'UPI', ''],
+    ['sale_demo_d2c', 2, 18, 45, 'Rahul Iyer', '9811111112', 'gym_item_racket', 'CASH', ''],
+    ['sale_demo_d3a', 3, 7, 30, 'Asha Menon', '9811111111', 'gym_item_plan_plan_quarterly', 'CARD', 'MEMBERSHIP:plan_quarterly'],
+    ['sale_demo_d3b', 3, 9, 15, 'Meera Shah', '9811111113', 'gym_item_fac_tennis', 'UPI', ''],
+    ['sale_demo_d3c', 3, 16, 0, 'Walk-in', '9820000102', 'gym_item_day_pass', 'CASH', ''],
+    ['sale_demo_d4a', 4, 8, 10, 'Leela Nair', '9811111115', 'gym_item_class', 'UPI', ''],
+    ['sale_demo_d4b', 4, 18, 20, 'Kabir Das', '9811111114', 'gym_item_fac_football', 'CASH', ''],
+    ['sale_demo_d5a', 5, 7, 45, 'Rahul Iyer', '9811111112', 'gym_item_fac_badminton', 'UPI', ''],
+    ['sale_demo_d5b', 5, 11, 0, 'Asha Menon', '9811111111', 'gym_item_shirt', 'CARD', ''],
+    ['sale_demo_d6a', 6, 9, 20, 'Meera Shah', '9811111113', 'gym_item_coaching', 'UPI', ''],
+    ['sale_demo_d6b', 6, 17, 10, 'Leela Nair', '9811111115', 'gym_item_fac_pool', 'CASH', ''],
+    ['sale_demo_d8a', 8, 10, 0, 'Kabir Das', '9811111114', 'gym_item_plan_plan_annual', 'UPI', 'MEMBERSHIP:plan_annual'],
+    ['sale_demo_d10a', 10, 8, 30, 'Asha Menon', '9811111111', 'gym_item_fac_badminton', 'CASH', ''],
+    ['sale_demo_d12a', 12, 16, 15, 'Rahul Iyer', '9811111112', 'gym_item_racket', 'UPI', ''],
+    ['sale_demo_d14a', 14, 7, 0, 'Meera Shah', '9811111113', 'gym_item_plan_plan_monthly', 'CARD', 'MEMBERSHIP:plan_monthly'],
+    ['sale_demo_d18a', 18, 9, 40, 'Leela Nair', '9811111115', 'gym_item_class', 'UPI', ''],
+    ['sale_demo_d21a', 21, 11, 10, 'Kabir Das', '9811111114', 'gym_item_fac_basketball', 'CASH', ''],
+    ['sale_demo_d24a', 24, 18, 0, 'Asha Menon', '9811111111', 'gym_item_shirt', 'UPI', ''],
+    ['sale_demo_d28a', 28, 8, 20, 'Rahul Iyer', '9811111112', 'gym_item_day_pass', 'CASH', ''],
+  ];
+
+  for (const [id, ago, hour, minute, name, mobile, item, method, notes] of sales) {
+    if (!get('SELECT id FROM menu_items WHERE id = ?', [item])) continue;
+    try {
+      const order = createStaffOrder({
+        id,
+        clientKey: id,
+        customerName: name,
+        customerMobile: mobile,
+        items: [{ menuItemId: item, quantity: 1, addonIds: [] }],
+        notes,
+        allowOpenTable: true,
+      });
+      if (method) markPaid(order.id, method);
+      retimeOrder(order.id, new Date(`${istDaysAgo(ago)}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+05:30`).toISOString());
+    } catch {
+      /* skip a missing catalog row so the rest of the desk still seeds */
+    }
   }
 }
 
@@ -1513,10 +2334,12 @@ export function registerGymRoutes(
     const facility = get('SELECT id FROM facilities WHERE id = ? AND cafe_id = ?', [facilityId, CAFE_ID]);
     if (!facility) throw new AppError(404, 'FACILITY', 'Facility not found.');
     const who = actor(req).name;
+    const details = taskDetails(req.body, { category: 'Repair', priority: 'NORMAL', assignedTo: '', cost: 0 });
     const id = randomUUID();
     run(
-      `INSERT INTO maintenance_records (id, cafe_id, facility_id, title, notes, status, starts_at, ends_at, created_at, actor) VALUES (?, ?, ?, ?, ?, 'OPEN', ?, NULL, ?, ?)`,
-      [id, CAFE_ID, facilityId, title.slice(0, 120), String(req.body?.notes ?? '').slice(0, 2000), nowIso(), nowIso(), who],
+      `INSERT INTO maintenance_records (id, cafe_id, facility_id, title, notes, status, starts_at, ends_at, created_at, actor, category, priority, assigned_to, cost)
+       VALUES (?, ?, ?, ?, ?, 'OPEN', ?, NULL, ?, ?, ?, ?, ?, ?)`,
+      [id, CAFE_ID, facilityId, title.slice(0, 120), String(req.body?.notes ?? '').slice(0, 2000), nowIso(), nowIso(), who, details.category, details.priority, details.assignedTo, details.cost],
     );
     if (req.body?.block) {
       run(`UPDATE facilities SET is_available = 0, maintenance_status = 'MAINTENANCE', updated_at = ? WHERE id = ?`, [nowIso(), facilityId]);
@@ -1526,20 +2349,28 @@ export function registerGymRoutes(
   }));
   app.patch('/api/gym/maintenance/:id', allow('FACILITY_MANAGER', 'RECEPTIONIST'), wrap((req, res) => {
     const id = String(req.params.id);
-    const row = get<{ facility_id: string; title: string; notes: string }>('SELECT facility_id, title, notes FROM maintenance_records WHERE id = ? AND cafe_id = ?', [id, CAFE_ID]);
+    const row = get<{ facility_id: string; title: string; notes: string; category: string; priority: string; assigned_to: string; cost: number }>(
+      'SELECT facility_id, title, notes, category, priority, assigned_to, cost FROM maintenance_records WHERE id = ? AND cafe_id = ?',
+      [id, CAFE_ID],
+    );
     if (!row) throw new AppError(404, 'MAINTENANCE', 'Task not found.');
     const title = String(req.body?.title ?? row.title).trim();
     if (!title) throw new AppError(400, 'MAINTENANCE', 'Enter the task.');
     const facilityId = String(req.body?.facilityId ?? row.facility_id);
     if (!get('SELECT id FROM facilities WHERE id = ? AND cafe_id = ?', [facilityId, CAFE_ID])) throw new AppError(404, 'FACILITY', 'Facility not found.');
-    run('UPDATE maintenance_records SET title = ?, notes = ?, facility_id = ? WHERE id = ?', [title.slice(0, 120), String(req.body?.notes ?? row.notes).slice(0, 2000), facilityId, id]);
+    const details = taskDetails(req.body, { category: row.category, priority: row.priority, assignedTo: row.assigned_to, cost: row.cost });
+    run(
+      'UPDATE maintenance_records SET title = ?, notes = ?, facility_id = ?, category = ?, priority = ?, assigned_to = ?, cost = ? WHERE id = ?',
+      [title.slice(0, 120), String(req.body?.notes ?? row.notes).slice(0, 2000), facilityId, details.category, details.priority, details.assignedTo, details.cost, id],
+    );
     audit(actor(req).name, 'EDIT_TASK', 'maintenance', id, title);
     res.json({ id });
   }));
   app.get('/api/gym/maintenance', allow('FACILITY_MANAGER', 'RECEPTIONIST'), wrap((_req, res) => {
     res.json({
       records: all(
-        `SELECT m.id, m.title, m.notes, m.status, m.starts_at, m.ends_at, m.actor, m.facility_id, f.name AS facility
+        `SELECT m.id, m.title, m.notes, m.status, m.starts_at, m.ends_at, m.actor, m.facility_id, m.category, m.priority, m.assigned_to, m.cost,
+                f.name AS facility, f.maintenance_status AS facility_status
          FROM maintenance_records m JOIN facilities f ON f.id = m.facility_id WHERE m.cafe_id = ? ORDER BY m.starts_at DESC`,
         [CAFE_ID],
       ),
@@ -1554,7 +2385,7 @@ export function registerGymRoutes(
     res.json({ ok: true });
   }));
 
-  app.get('/api/gym/plans', allow('RECEPTIONIST', 'CASHIER'), wrap((_req, res) => {
+  app.get('/api/gym/plans', allow('RECEPTIONIST', 'CASHIER', 'COACH'), wrap((_req, res) => {
     res.json({ plans: listPlans() });
   }));
   app.post('/api/gym/plans', allow('MANAGER'), wrap((req, res) => {
@@ -1587,7 +2418,7 @@ export function registerGymRoutes(
   }));
   app.post('/api/gym/bookings/:id/status', allow('RECEPTIONIST', 'CASHIER', 'FACILITY_MANAGER'), wrap((req, res) => {
     const status = String(req.body?.status ?? '');
-    if (!['CANCELLED', 'CHECKED_IN', 'COMPLETED', 'NO_SHOW'].includes(status)) throw new AppError(400, 'STATUS', 'Unknown booking status.');
+    if (!BOOKING_STATUSES.includes(status as (typeof BOOKING_STATUSES)[number])) throw new AppError(400, 'STATUS', 'Unknown booking status.');
     res.json({ booking: setBookingStatus(String(req.params.id), status as 'CANCELLED', actor(req).name) });
   }));
   app.post('/api/gym/bookings/:id/refund', allow('CASHIER', 'RECEPTIONIST'), wrap((req, res) => {
@@ -1613,7 +2444,11 @@ export function registerGymRoutes(
     res.json({
       classes: all(`SELECT c.*, t.name AS trainer_name, t.phone AS trainer_phone, t.email AS trainer_email FROM gym_classes c LEFT JOIN trainers t ON t.id = c.trainer_id WHERE c.cafe_id = ? ORDER BY c.name`, [CAFE_ID]),
       trainers: listTrainers(),
-      registrations: all(`SELECT r.*, c.name AS class_name FROM class_registrations r LEFT JOIN gym_classes c ON c.id = r.class_id ORDER BY r.created_at DESC LIMIT 100`),
+      registrations: all(
+        `SELECT r.*, c.name AS class_name, c.schedule AS class_schedule, t.name AS trainer_name, t.phone AS trainer_phone
+         FROM class_registrations r LEFT JOIN gym_classes c ON c.id = r.class_id LEFT JOIN trainers t ON t.id = c.trainer_id
+         ORDER BY r.created_at DESC LIMIT 100`,
+      ),
     });
   }));
   app.post('/api/gym/classes', allow('COACH'), wrap((req, res) => {
@@ -1646,6 +2481,26 @@ export function registerGymRoutes(
   }));
   app.patch('/api/gym/trainers/:id', allow('COACH', 'MANAGER'), wrap((req, res) => {
     res.json(saveTrainer({ ...(req.body ?? {}), id: String(req.params.id) }, actor(req).name));
+  }));
+  app.get('/api/gym/join-requests', allow('COACH', 'RECEPTIONIST', 'CASHIER'), wrap((req, res) => {
+    res.json({ requests: listJoinRequests(String(req.query.route ?? '')), idTypes: ID_TYPES });
+  }));
+  app.get('/api/gym/join-requests/:id', allow('COACH', 'RECEPTIONIST', 'CASHIER'), wrap((req, res) => {
+    res.json({ request: getJoinRequest(String(req.params.id)), idTypes: ID_TYPES });
+  }));
+  app.patch('/api/gym/join-requests/:id', allow('COACH', 'RECEPTIONIST', 'CASHIER'), wrap((req, res) => {
+    res.json({ request: updateJoinRequest(String(req.params.id), req.body ?? {}, actor(req).name) });
+  }));
+  app.post('/api/gym/join-requests/:id/contacted', allow('COACH', 'RECEPTIONIST', 'CASHIER'), wrap((req, res) => {
+    res.json({ request: markJoinContacted(String(req.params.id), actor(req).name) });
+  }));
+  app.post('/api/gym/join-requests/:id/approve', allow('COACH', 'RECEPTIONIST', 'CASHIER'), wrap((req, res) => {
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;
+    res.json({ request: approveJoinRequest(String(req.params.id), req.body?.method ? String(req.body.method) : undefined, actor(req).name, notes) });
+  }));
+  app.post('/api/gym/join-requests/:id/decline', allow('COACH', 'RECEPTIONIST', 'CASHIER'), wrap((req, res) => {
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;
+    res.json(declineJoinRequest(String(req.params.id), String(req.body?.reason ?? ''), actor(req).name, notes));
   }));
   app.post('/api/gym/classes/:id/register', allow('COACH', 'RECEPTIONIST'), wrap((req, res) => {
     const klass = get<{ capacity: number; name: string }>('SELECT capacity, name FROM gym_classes WHERE id = ?', [String(req.params.id)]);
@@ -1779,7 +2634,47 @@ export function registerGymRoutes(
       razorpay: Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
     });
   }));
-  app.post('/api/portal/login', wrap((req, res) => {
+  app.post('/api/portal/login', wrap(async (req, res) => {
+    const email = text(req.body?.email).toLowerCase();
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (email) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 120) {
+        throw new AppError(400, 'EMAIL', 'Enter a valid email address.');
+      }
+      if (password.length < 4 || password.length > 120) {
+        throw new AppError(400, 'PASSWORD', 'Enter a password of at least 4 characters.');
+      }
+      const row = get<{ id: string; password_hash: string; customer_id: string; mobile: string }>(
+        `SELECT id, password_hash, customer_id, mobile FROM join_requests WHERE cafe_id = ? AND lower(email) = ? ORDER BY updated_at DESC LIMIT 1`,
+        [CAFE_ID, email],
+      );
+      if (!row?.password_hash || !(await verifyPassword(password, row.password_hash))) {
+        throw new AppError(401, 'AUTH', 'Email or password is incorrect.');
+      }
+      const govtIdUrl = text(req.body?.govtIdUrl);
+      if (govtIdUrl) {
+        if ((!govtIdUrl.startsWith('data:image/') && !govtIdUrl.startsWith('data:application/pdf')) || govtIdUrl.length > 1_500_000) {
+          throw new AppError(400, 'GOVT_ID', 'Upload the ID as a photo or PDF under 1 MB.');
+        }
+        run('UPDATE join_requests SET govt_id_url = ?, updated_at = ? WHERE id = ?', [govtIdUrl, nowIso(), row.id]);
+      }
+      let customerId = row.customer_id;
+      if (!customerId) {
+        customerId = get<{ id: string }>(
+          row.mobile
+            ? 'SELECT id FROM customers WHERE cafe_id = ? AND (lower(email) = ? OR mobile = ?) LIMIT 1'
+            : 'SELECT id FROM customers WHERE cafe_id = ? AND lower(email) = ? LIMIT 1',
+          row.mobile ? [CAFE_ID, email, row.mobile] : [CAFE_ID, email],
+        )?.id ?? '';
+      }
+      if (!customerId) {
+        res.json({ ok: true, pending: true });
+        return;
+      }
+      res.setHeader('Set-Cookie', memberCookie(customerId));
+      res.json({ ok: true, pending: false });
+      return;
+    }
     if (!exposeDevOtp()) {
       throw new AppError(503, 'OTP', 'Member sign-in needs the SMS OTP provider. Set OTP_PROVIDER, or sign in at the desk.');
     }
@@ -1804,6 +2699,36 @@ export function registerGymRoutes(
       [req.body.email ?? null, req.body.emergencyContact ?? null, req.body.notifyPrefs ?? null, customerId],
     );
     res.json(memberProfile(customerId));
+  }));
+  app.get('/api/portal/join', wrap((_req, res) => {
+    res.json(joinOptions());
+  }));
+  app.post('/api/portal/join', wrap(async (req, res) => {
+    const body = { ...(req.body ?? {}) } as Record<string, unknown>;
+    const password = typeof body.password === 'string' ? body.password : '';
+    delete body.password;
+    delete body.passwordHash;
+    if (password) {
+      if (password.length < 4 || password.length > 120) throw new AppError(400, 'PASSWORD', 'Enter a password of at least 4 characters.');
+      body.passwordHash = await hashPassword(password);
+    }
+    res.status(201).json({ request: createJoinRequest(body) });
+  }));
+  app.get('/api/portal/join/:id', wrap((req, res) => {
+    res.json({ request: getPublicJoin(String(req.params.id)) });
+  }));
+  app.post('/api/portal/join/:id/pay', wrap(async (req, res) => {
+    res.json(await startJoinPayment(String(req.params.id)));
+  }));
+  app.post('/api/portal/join/:id/verify', wrap((req, res) => {
+    res.json({
+      request: confirmJoinPayment(
+        String(req.params.id),
+        String(req.body?.razorpayOrderId ?? ''),
+        String(req.body?.razorpayPaymentId ?? ''),
+        String(req.body?.razorpaySignature ?? ''),
+      ),
+    });
   }));
   app.get('/api/portal/slots', wrap((req, res) => {
     res.json(slotsFor(String(req.query.facilityId ?? ''), String(req.query.date ?? ''), Number(req.query.duration ?? 0)));

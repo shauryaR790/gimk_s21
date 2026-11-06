@@ -1,27 +1,12 @@
 import { lazy, Suspense, useLayoutEffect } from 'react';
-import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoadingState } from './components/LoadingState';
 import { ToastHost } from './components/Toast';
-import { CartProvider } from './features/customer/cart';
-import { CartPage } from './features/customer/CartPage';
-import { CheckoutPage } from './features/customer/CheckoutPage';
-import { GuestExperienceLayout } from './features/customer/GuestExperienceLayout';
-import { HeroPage } from './features/customer/HeroPage';
-import { MenuPage } from './features/customer/MenuPage';
-import { OrderPage } from './features/customer/OrderPage';
-import { TableQrPage } from './features/customer/TableQrPage';
 import { LoginPage } from './features/pos/LoginPage';
-import {
-  MemberBookingsPage,
-  MemberBookPage,
-  MemberClassesPage,
-  MemberEventsPage,
-  MemberHomePage,
-  MemberPaymentsPage,
-  MemberPlansPage,
-  MemberProfilePage,
-} from './features/member/portal';
+import { LoginPage as SiteLoginPage } from './features/site/LoginPage';
+import { RegisterPage } from './features/site/RegisterPage';
+import { SiteHome } from './features/site/SiteHome';
 import { resetScrollLock } from './lib/scrollLock';
 
 const PosShell = lazy(() => import('./features/pos/PosShell'));
@@ -51,29 +36,14 @@ export function App() {
       <BrowserRouter>
         <ScrollUnlock />
         <ToastHost />
-        <CartProvider>
-          <Routes>
-            <Route path="/qr/:code" element={<TableQrPage />} />
-            <Route element={<GuestExperienceLayout />}>
-              <Route path="/" element={<HeroPage />} />
-              <Route path="/menu" element={<MenuPage />} />
-              <Route path="/cart" element={<CartPage />} />
-              <Route path="/checkout" element={<CheckoutPage />} />
-            </Route>
-            <Route path="/order/:id" element={<OrderPage />} />
-            <Route path="/member" element={<MemberHomePage />} />
-            <Route path="/member/book" element={<MemberBookPage />} />
-            <Route path="/member/plans" element={<MemberPlansPage />} />
-            <Route path="/member/bookings" element={<MemberBookingsPage />} />
-            <Route path="/member/classes" element={<MemberClassesPage />} />
-            <Route path="/member/events" element={<MemberEventsPage />} />
-            <Route path="/member/payments" element={<MemberPaymentsPage />} />
-            <Route path="/member/profile" element={<MemberProfilePage />} />
-            <Route path="/pos/login" element={<LoginPage />} />
-            <Route path="/pos/*" element={<Suspense fallback={<div className="o-screen-state"><LoadingState label="Loading" /></div>}><PosShell /></Suspense>} />
-            <Route path="*" element={<main className="cust narrow"><h1>Page not found</h1></main>} />
-          </Routes>
-        </CartProvider>
+        <Routes>
+          <Route path="/" element={<SiteHome />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/login" element={<SiteLoginPage />} />
+          <Route path="/pos/login" element={<LoginPage />} />
+          <Route path="/pos/*" element={<Suspense fallback={<div className="o-screen-state"><LoadingState label="Loading" /></div>}><PosShell /></Suspense>} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </BrowserRouter>
     </ErrorBoundary>
   );

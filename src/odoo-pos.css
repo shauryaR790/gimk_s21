@@ -191,11 +191,11 @@ body:has(.odoo-pos) {
   border-bottom: 0;
 }
 
-.o-be-awning {
+.o-be-mark {
   display: block;
   flex-shrink: 0;
-  width: 30px;
-  height: 28px;
+  width: 18px;
+  height: 18px;
   object-fit: contain;
 }
 
@@ -208,7 +208,7 @@ body:has(.odoo-pos) {
 .o-be-nav__brand {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-weight: 400;
   font-size: 14px;
   margin-right: 10px;
@@ -4623,7 +4623,7 @@ body:has(.o-login) {
 
 .o-login__logo {
   width: 48px;
-  height: 44px;
+  height: 48px;
   object-fit: contain;
   flex-shrink: 0;
 }
@@ -5579,6 +5579,235 @@ body:has(.o-login) {
 .o-be-body:has(.o-track),
 .o-be-body:has(.o-stock) {
   background: #f8f9fa;
+}
+
+.odoo-pos--backend .o-be-body {
+  background-color: #0a0a0a;
+  background-image: url("/ui/grain-dark.png?v=2");
+  background-repeat: repeat;
+  background-size: 160px 940px;
+  background-blend-mode: overlay;
+}
+
+.gk-dash {
+  min-height: calc(100dvh - 128px);
+}
+
+.gk-dash .o-track__hello h2 {
+  color: #f3f3f3;
+}
+
+.odoo-pos--backend {
+  background: #0a0a0a;
+  color: #f0f0f0;
+}
+
+html:has(.odoo-pos--backend),
+html:has(.odoo-pos--backend) body,
+html:has(.odoo-pos--backend) #root,
+.odoo-pos--backend,
+.odoo-pos--backend .o-be-body {
+  color-scheme: dark;
+  scrollbar-width: thin;
+  scrollbar-color: #1a1a1a #000000;
+}
+
+html:has(.odoo-pos--backend)::-webkit-scrollbar,
+html:has(.odoo-pos--backend) body::-webkit-scrollbar,
+html:has(.odoo-pos--backend) #root::-webkit-scrollbar,
+.odoo-pos--backend::-webkit-scrollbar,
+.odoo-pos--backend .o-be-body::-webkit-scrollbar,
+.odoo-pos--backend *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: #000000;
+}
+
+html:has(.odoo-pos--backend)::-webkit-scrollbar-track,
+html:has(.odoo-pos--backend) body::-webkit-scrollbar-track,
+html:has(.odoo-pos--backend) #root::-webkit-scrollbar-track,
+.odoo-pos--backend::-webkit-scrollbar-track,
+.odoo-pos--backend .o-be-body::-webkit-scrollbar-track,
+.odoo-pos--backend *::-webkit-scrollbar-track {
+  background: #000000;
+}
+
+html:has(.odoo-pos--backend)::-webkit-scrollbar-thumb,
+html:has(.odoo-pos--backend) body::-webkit-scrollbar-thumb,
+html:has(.odoo-pos--backend) #root::-webkit-scrollbar-thumb,
+.odoo-pos--backend::-webkit-scrollbar-thumb,
+.odoo-pos--backend .o-be-body::-webkit-scrollbar-thumb,
+.odoo-pos--backend *::-webkit-scrollbar-thumb {
+  background: #1a1a1a;
+  border: 2px solid #000000;
+  border-radius: 8px;
+}
+
+html:has(.odoo-pos--backend)::-webkit-scrollbar-thumb:hover,
+.odoo-pos--backend *::-webkit-scrollbar-thumb:hover {
+  background: #2a2a2a;
+}
+
+html:has(.odoo-pos--backend)::-webkit-scrollbar-corner,
+.odoo-pos--backend *::-webkit-scrollbar-corner {
+  background: #000000;
+}
+
+.odoo-pos--backend .o-be-nav,
+.odoo-pos--backend .o-be-nav--light,
+.odoo-pos--backend .o-be-control {
+  background: #111111;
+  color: #f3f3f3;
+  border-color: #111111;
+}
+
+.odoo-pos--backend .o-be-nav__brand,
+.odoo-pos--backend .o-be-nav__link,
+.odoo-pos--backend .o-be-control__title,
+.odoo-pos--backend .o-be-pager,
+.odoo-pos--backend .o-be-nav .o-icon-btn,
+.odoo-pos--backend .o-be-icon,
+.odoo-pos--backend .o-be-icon--bare,
+.odoo-pos--backend .o-be-icon--dots {
+  color: #f3f3f3;
+}
+
+.odoo-pos--backend .o-be-nav--light .o-be-nav__link:hover,
+.odoo-pos--backend .o-be-nav--light .o-be-nav__link.is-active,
+.odoo-pos--backend .o-be-icon--bare:hover,
+.odoo-pos--backend .o-be-icon--bare.is-on,
+.odoo-pos--backend .o-be-icon--dots:hover {
+  color: #ffffff;
+}
+
+.odoo-pos--backend .o-be-mark {
+  filter: invert(1);
+}
+
+.odoo-pos--backend .o-be-nav .o-search--nav,
+.odoo-pos--backend .o-be-search {
+  background: #1c1c1c;
+  border-color: #2a2a2a;
+  color: #9a9a9a;
+}
+
+.odoo-pos--backend .o-be-nav .o-search--nav input,
+.odoo-pos--backend .o-be-search input {
+  color: #f3f3f3;
+}
+
+.odoo-pos--backend .o-be-nav__link--menu.is-open {
+  border-color: #4a4a4a;
+}
+
+.odoo-pos--backend .o-be-page-btns .o-be-icon {
+  background: #1c1c1c;
+  border-color: #2a2a2a;
+  color: #f3f3f3;
+}
+
+.odoo-pos--backend .o-be-view-switch {
+  background: #1c1c1c;
+  border-color: #2a2a2a;
+}
+
+.odoo-pos--backend .o-be-view-switch .o-be-icon.is-on {
+  background: #000000;
+  box-shadow: none;
+  color: #f3f3f3;
+}
+
+.odoo-pos--backend .o-online-dot {
+  border-color: #111111;
+}
+
+.gk-dash .o-track__kpis article,
+.gk-dash .o-track__card,
+.gk-dash .o-track__stat,
+.gk-dash .o-track__stat--plain,
+.gk-dash .gk-board-card {
+  background-color: #2a2a2a;
+  background-image: url("/ui/grain-dark.png?v=2");
+  background-repeat: repeat;
+  background-size: 160px 940px;
+  background-blend-mode: overlay;
+  border: 1px solid #2e2e2e;
+  color: #f0f0f0;
+}
+
+.gk-dash .o-track__kpis span,
+.gk-dash .o-track__kpis em,
+.gk-dash .o-track__card h3,
+.gk-dash .o-track__stat span,
+.gk-dash .o-track__stat em,
+.gk-dash .o-track__donut-wrap li,
+.gk-dash .o-track__donut-wrap em,
+.gk-dash .o-track__bars small,
+.gk-dash .o-track__table,
+.gk-dash .o-track__table th,
+.gk-dash .o-track__table td,
+.gk-dash .o-track__kpis strong,
+.gk-dash .o-track__stat strong,
+.gk-dash .o-track__stat--plain strong {
+  color: #f0f0f0;
+}
+
+.gk-dash .o-track__kpis span,
+.gk-dash .o-track__kpis em,
+.gk-dash .o-track__card h3,
+.gk-dash .o-track__stat em,
+.gk-dash .o-track__bars small,
+.gk-dash .o-track__table th {
+  color: #b5b5b5;
+}
+
+.gk-dash .o-track__donut text {
+  fill: #f0f0f0;
+}
+
+.gk-dash .o-track__plot i {
+  background: #8b1219;
+}
+
+.gk-dash .o-track__kpis article:hover,
+.gk-dash .o-track__stat:hover,
+.gk-dash .o-track__card:hover,
+.gk-dash .gk-board-card:hover:not(:disabled) {
+  border-color: #5a5a5a;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.gk-dash .o-track__table th,
+.gk-dash .o-track__table td,
+.gk-dash .o-be-table thead th,
+.gk-dash .o-be-table tbody td {
+  border-bottom-color: #3a3a3a;
+}
+
+.gk-dash .o-track__methods i,
+.gk-dash .o-track__donut circle[stroke="#e9ecef"] {
+  background: #3a3a3a;
+  stroke: #3a3a3a;
+}
+
+.gk-dash .gk-dd--box .gk-dd__btn,
+.odoo-pos--backend .gk-dd--box .gk-dd__btn {
+  background: #2a2a2a;
+  border-color: #4a4a4a;
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .gk-dd--box .gk-dd__btn:hover:not(:disabled) {
+  border-color: #5a5a5a;
+}
+
+.odoo-pos--backend .gk-dd__btn svg {
+  color: #9a9a9a;
+}
+
+.gk-dash .o-be-table__empty,
+.gk-dash .gk-empty-line {
+  color: #b5b5b5;
 }
 
 .odoo-pos--backend:has(.gk-empty-page) {
@@ -6742,6 +6971,104 @@ html:has(.odoo-pos--backend) body:has(.odoo-pos--backend) {
   font-size: 13px;
 }
 
+.gk-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.gk-board-card {
+  display: grid;
+  gap: 4px;
+  min-height: 96px;
+  padding: 14px 16px;
+  border: 1px solid #e6e8eb;
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gk-board-card:disabled {
+  cursor: default;
+}
+
+.gk-board-card:hover:not(:disabled) {
+  border-color: #c5c9ce;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+.gk-board-card strong {
+  font: 500 14px/1.25 Inter, var(--o-font);
+  color: #212529;
+}
+
+.gk-board-card span,
+.gk-board-card em {
+  color: #868e96;
+  font: 400 13px/1.3 Inter, var(--o-font);
+  font-style: normal;
+}
+
+.gk-agenda {
+  display: grid;
+  gap: 18px;
+}
+
+.gk-agenda h3 {
+  margin: 0 0 8px;
+  color: #212529;
+  font: 600 13px/1.2 Inter, var(--o-font);
+}
+
+.gk-agenda ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid #e6e8eb;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.gk-agenda li + li {
+  border-top: 1px solid #eef0f2;
+}
+
+.gk-agenda button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gk-agenda button:disabled {
+  cursor: default;
+}
+
+.gk-agenda button:hover:not(:disabled) {
+  background: #f8f9fa;
+}
+
+.gk-agenda strong {
+  font: 500 14px/1.25 Inter, var(--o-font);
+}
+
+.gk-agenda span,
+.gk-agenda em {
+  color: #868e96;
+  font: 400 13px/1.3 Inter, var(--o-font);
+  font-style: normal;
+}
+
 /* List pages */
 .gk-table {
   margin-bottom: 8px;
@@ -6838,20 +7165,61 @@ html:has(.odoo-pos--backend) body:has(.odoo-pos--backend) {
   text-transform: none;
 }
 
-.gk-pill.is-confirmed {
+.gk-pill.is-confirmed,
+.gk-pill.is-booked {
   background: #e3f2fd;
   color: #1565c0;
 }
 
-.gk-pill.is-checked_in {
+.gk-pill.is-checked_in,
+.gk-pill.is-active {
   background: #e8f5e9;
   color: #2e7d32;
+}
+
+.gk-pill.is-completed {
+  background: #ede7f6;
+  color: #5e35b1;
 }
 
 .gk-pill.is-cancelled,
 .gk-pill.is-no_show {
   background: #fdecea;
   color: #c62828;
+}
+
+.gk-stages {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.gk-stages .gk-pill:not(.is-on) {
+  background: #f1f3f5;
+  color: #868e96;
+}
+
+.gk-stages .gk-pill.is-on {
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+
+.gk-toolbar .gk-stages .gk-pill {
+  cursor: pointer;
+}
+
+.gk-toolbar .gk-stages .gk-pill.is-on:not(.is-booked):not(.is-active):not(.is-completed):not(.is-cancelled) {
+  background: #212529;
+  color: #ffffff;
+}
+
+.gk-stages .gk-pill.is-pick:not(.is-on) {
+  color: #495057;
+  cursor: pointer;
+}
+
+.gk-stages .gk-pill:disabled {
+  cursor: default;
 }
 
 /* Shift cards */
@@ -7078,4 +7446,751 @@ html.o-foh-dark .odoo-pos .gk-btn {
 
 html.o-foh-dark .gk-shift dl {
   border-color: #3a3d42;
+}
+
+/* Gymkhana: membership requests and trainer free slots */
+.odoo-pos a.gk-btn {
+  text-decoration: none;
+}
+
+td.gk-actions > a.gk-btn + button {
+  margin-left: 6px;
+}
+
+.o-prod__field .gk-link {
+  margin-left: 10px;
+  color: #017e84;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.o-prod__field .gk-link:hover {
+  text-decoration: underline;
+}
+
+.o-prod__field .gk-hours {
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.gk-pill.is-join-new {
+  background: #fff4e5;
+  color: #b45309;
+}
+
+.gk-pill.is-join-contacted {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.gk-pill.is-join-approved {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.gk-pill.is-join-declined {
+  background: #fdecea;
+  color: #c62828;
+}
+
+.gk-pill.is-prio-urgent {
+  background: #fdecea;
+  color: #c62828;
+}
+
+.gk-pill.is-prio-high {
+  background: #fff4e5;
+  color: #b45309;
+}
+
+.gk-pill.is-prio-low {
+  color: #868e96;
+}
+
+.gk-slots {
+  padding: 4px 0 8px;
+}
+
+.gk-slots__bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-bottom: 12px;
+  color: #495057;
+  font-size: 13px;
+}
+
+.gk-slots__bar strong {
+  color: #212529;
+}
+
+.gk-slots__bar .gk-btn {
+  margin-left: auto;
+}
+
+.gk-slots__legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #6c757d;
+}
+
+.gk-slots__legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  margin-left: 6px;
+}
+
+.gk-slots__legend i.is-free {
+  background: #111111;
+}
+
+.gk-slots__legend i.is-held {
+  background: #017e84;
+}
+
+.gk-slots__scroll {
+  overflow-x: auto;
+}
+
+.gk-slots__grid {
+  border-collapse: separate;
+  border-spacing: 4px;
+  min-width: 560px;
+  width: 100%;
+  table-layout: fixed;
+  user-select: none;
+  touch-action: none;
+}
+
+.gk-slots__grid thead th:first-child {
+  width: 56px;
+}
+
+.gk-slots__grid th {
+  padding: 0;
+  font-weight: 600;
+  font-size: 12px;
+  color: #495057;
+}
+
+.odoo-pos .gk-slots__grid th button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 4px 2px;
+  border-radius: 4px;
+  font: 600 12px/1 "Inter", var(--o-font);
+  color: #495057;
+  cursor: pointer;
+}
+
+.odoo-pos .gk-slots__grid th[scope='row'] button {
+  text-align: right;
+  padding-right: 8px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: #6c757d;
+}
+
+.odoo-pos .gk-slots__grid th button:hover {
+  background: #f1f3f5;
+  color: #111111;
+}
+
+.gk-slots__grid td {
+  padding: 0;
+}
+
+.odoo-pos .gk-slot {
+  display: block;
+  width: 100%;
+  height: 24px;
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+  background: #f8f9fa;
+  color: #ffffff;
+  font: 600 10px/1 "Inter", var(--o-font);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, transform 0.08s ease;
+}
+
+.odoo-pos .gk-slot:hover:not(:disabled) {
+  border-color: #adb5bd;
+}
+
+.odoo-pos .gk-slot:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.odoo-pos .gk-slot:focus-visible {
+  outline: 2px solid #017e84;
+  outline-offset: 1px;
+}
+
+.odoo-pos .gk-slot.is-free {
+  background: #111111;
+  border-color: #111111;
+}
+
+.odoo-pos .gk-slot.is-free:hover:not(:disabled) {
+  background: #333333;
+}
+
+.odoo-pos .gk-slot.is-held {
+  background: #017e84;
+  border-color: #017e84;
+  cursor: default;
+}
+
+html.o-foh-dark .odoo-pos .gk-slot {
+  background: #2b2f33;
+  border-color: #3a3d42;
+}
+
+html.o-foh-dark .odoo-pos .gk-slot.is-free {
+  background: #e9ecef;
+  border-color: #e9ecef;
+  color: #111111;
+}
+
+html.o-foh-dark .gk-slots__bar strong {
+  color: #e9ecef;
+}
+
+/* —— Gymkhana POS: black / blood red / grey lines —— */
+.odoo-pos--backend .o-be-dropdown,
+.odoo-pos.odoo-pos--backend .o-be-dropdown,
+.odoo-pos--backend .o-be-dropdown.gk-dd__menu {
+  background: #000000;
+  color: #f0f0f0;
+  border-color: #2e2e2e;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+}
+
+.odoo-pos.odoo-pos--backend .o-be-dropdown__item,
+.odoo-pos--backend .o-be-dropdown__item {
+  color: #f0f0f0 !important;
+  -webkit-text-fill-color: #f0f0f0 !important;
+}
+
+.odoo-pos--backend .o-be-dropdown__item:hover,
+.odoo-pos--backend .o-be-dropdown__item.is-on {
+  background: #1a1a1a;
+}
+
+.odoo-pos.odoo-pos--backend .gk-dd--box .gk-dd__btn {
+  background: #000000;
+  border-color: #2e2e2e;
+  color: #f0f0f0;
+}
+
+.odoo-pos.odoo-pos--backend .gk-dd--box.is-open .gk-dd__btn,
+.odoo-pos.odoo-pos--backend .gk-dd--field.is-open .gk-dd__btn {
+  border-color: #8b1219;
+}
+
+.odoo-pos--backend .gk-dd.is-open .gk-dd__btn svg {
+  color: #8b1219;
+}
+
+.odoo-pos.odoo-pos--backend .gk-dd--field .gk-dd__btn,
+.odoo-pos--backend .o-prod__field .gk-dd__value {
+  color: #f0f0f0;
+  border-bottom-color: #3a3a3a;
+}
+
+.odoo-pos--backend .gk-dd__value.is-placeholder,
+.odoo-pos--backend .o-prod__field .gk-dd__value.is-placeholder {
+  color: #8a8a8a;
+}
+
+.odoo-pos--backend .gk-dd__none {
+  color: #8a8a8a;
+}
+
+.odoo-pos--backend .o-prod {
+  background: transparent;
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .o-track__kpis article,
+.odoo-pos--backend .o-track__card,
+.odoo-pos--backend .o-track__stat,
+.odoo-pos--backend .o-track__stat--plain,
+.odoo-pos--backend .gk-board-card,
+.odoo-pos--backend .o-kanban-card,
+.odoo-pos--backend .gk-shift,
+.odoo-pos--backend .o-prod__main,
+.odoo-pos--backend .o-prod__chatter,
+.odoo-pos--backend .gk-empty-line {
+  background-color: #2a2a2a;
+  background-image: url("/ui/grain-dark.png?v=2");
+  background-repeat: repeat;
+  background-size: 160px 940px;
+  background-blend-mode: overlay;
+  border-color: #2e2e2e;
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .o-track,
+.odoo-pos--backend .o-track__hello h2,
+.odoo-pos--backend .o-track__hello p,
+.odoo-pos--backend .o-track__kpis span,
+.odoo-pos--backend .o-track__kpis strong,
+.odoo-pos--backend .o-track__kpis em,
+.odoo-pos--backend .o-track__card h3,
+.odoo-pos--backend .o-track__payline,
+.odoo-pos--backend .o-track__table,
+.odoo-pos--backend .o-track__table th,
+.odoo-pos--backend .o-track__table td,
+.odoo-pos--backend .o-track__stat,
+.odoo-pos--backend .o-track__stat strong,
+.odoo-pos--backend .o-track__stat em,
+.odoo-pos--backend .o-track__donut-wrap li,
+.odoo-pos--backend .o-track__period,
+.odoo-pos--backend .o-kanban-card,
+.odoo-pos--backend .o-kanban-card__name,
+.odoo-pos--backend .gk-board-card strong,
+.odoo-pos--backend .gk-found p,
+.odoo-pos--backend .o-track__card.gk-found h3 {
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .o-track__kpis span,
+.odoo-pos--backend .o-track__kpis em,
+.odoo-pos--backend .o-track__card h3,
+.odoo-pos--backend .o-track__stat em,
+.odoo-pos--backend .o-track__bars small,
+.odoo-pos--backend .o-track__table th,
+.odoo-pos--backend .gk-board-card span,
+.odoo-pos--backend .gk-board-card em,
+.odoo-pos--backend .o-kanban-card__price,
+.odoo-pos--backend .gk-note,
+.odoo-pos--backend .gk-muted,
+.odoo-pos--backend .gk-lines header span {
+  color: #b5b5b5;
+}
+
+.odoo-pos--backend .o-track__plot i {
+  background: #8b1219;
+}
+
+.odoo-pos--backend .o-track__donut text {
+  fill: #f0f0f0;
+}
+
+.odoo-pos--backend .o-track__donut circle[stroke="#e9ecef"] {
+  stroke: #3a3a3a;
+}
+
+.odoo-pos--backend .o-track__kpis article:hover,
+.odoo-pos--backend .o-track__stat:hover,
+.odoo-pos--backend .o-track__card:hover,
+.odoo-pos--backend .gk-board-card:hover:not(:disabled),
+.odoo-pos--backend .o-kanban-card:hover {
+  border-color: #4a4a4a;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.odoo-pos--backend .o-be-orders,
+.odoo-pos--backend .o-be-sessions,
+.odoo-pos--backend .o-cust,
+.odoo-pos--backend .o-be-table,
+.odoo-pos--backend .gk-sheet,
+.odoo-pos--backend .gk-sheet th,
+.odoo-pos--backend .gk-sheet td,
+.odoo-pos--backend .o-be-day td,
+.odoo-pos--backend .o-be-orders__foot,
+.odoo-pos--backend .gk-empty-page {
+  background: #0a0a0a;
+  border-color: #2e2e2e;
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .o-be-table thead th {
+  background: #111111;
+  border-bottom-color: #2e2e2e;
+  color: #b5b5b5;
+}
+
+.odoo-pos--backend .o-be-table tbody td,
+.odoo-pos--backend .o-track__table th,
+.odoo-pos--backend .o-track__table td,
+.odoo-pos--backend .gk-sheet th,
+.odoo-pos--backend .gk-sheet td,
+.odoo-pos--backend .gk-lines {
+  border-color: #2e2e2e;
+  border-bottom-color: #2e2e2e;
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .o-be-table tbody tr:hover {
+  background: #161616;
+}
+
+.odoo-pos--backend .o-be-table tbody tr.is-selected {
+  background: #1a1012;
+}
+
+.odoo-pos--backend .o-be-day__row > span:first-child {
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .o-be-day__line {
+  background: #2e2e2e;
+}
+
+.odoo-pos--backend .o-be-link,
+.odoo-pos--backend .o-prod__field .gk-link {
+  color: #c45c62;
+}
+
+.odoo-pos--backend .o-be-status {
+  background: #2a2a2a;
+  color: #b5b5b5;
+}
+
+.odoo-pos--backend .o-be-status--new {
+  background: #3a1214;
+  color: #e8a0a4;
+}
+
+.odoo-pos--backend .o-be-duration,
+.odoo-pos--backend .o-be-table__empty,
+.odoo-pos--backend .gk-empty h3,
+.odoo-pos--backend .gk-empty p,
+.odoo-pos--backend .o-cust__empty {
+  color: #b5b5b5;
+}
+
+.odoo-pos--backend .gk-empty h3 {
+  color: #f0f0f0;
+}
+
+.odoo-pos.odoo-pos--backend .gk-input,
+.odoo-pos.odoo-pos--backend .gk-select,
+.odoo-pos--backend .gk-inline input,
+.odoo-pos--backend .gk-inline select,
+.odoo-pos--backend .o-track select,
+.odoo-pos--backend .o-be-table select,
+.odoo-pos--backend .o-track__period select,
+.odoo-pos.odoo-pos--backend .gk-composer textarea {
+  background: #000000;
+  border-color: #2e2e2e;
+  color: #f0f0f0;
+}
+
+.odoo-pos.odoo-pos--backend .gk-input:hover,
+.odoo-pos.odoo-pos--backend .gk-dd--box .gk-dd__btn:hover:not(:disabled) {
+  border-color: #4a4a4a;
+}
+
+.odoo-pos.odoo-pos--backend .gk-input:focus,
+.odoo-pos.odoo-pos--backend .gk-composer textarea:focus {
+  border-color: #8b1219;
+  box-shadow: 0 0 0 3px rgba(139, 18, 25, 0.22);
+}
+
+.odoo-pos--backend .o-prod__title,
+.odoo-pos--backend .o-prod__field,
+.odoo-pos--backend .o-prod__field input,
+.odoo-pos--backend .o-prod__field select,
+.odoo-pos--backend .o-prod__field strong,
+.odoo-pos--backend .o-prod__money,
+.odoo-pos--backend .o-prod__money b,
+.odoo-pos--backend .o-prod__flags,
+.odoo-pos--backend .o-prod__crumb,
+.odoo-pos--backend .o-prod__crumb a,
+.odoo-pos--backend .o-prod__crumb strong,
+.odoo-pos--backend .o-prod__notes textarea,
+.odoo-pos--backend .o-prod__note header strong,
+.odoo-pos--backend .gk-lines h3,
+.odoo-pos--backend .gk-lines input {
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .o-prod__field span,
+.odoo-pos--backend .o-prod__field em,
+.odoo-pos--backend .o-prod__empty,
+.odoo-pos--backend .o-prod__notes h3,
+.odoo-pos--backend .o-prod__pager,
+.odoo-pos--backend .o-prod__note header {
+  color: #b5b5b5;
+}
+
+.odoo-pos--backend .o-prod__head,
+.odoo-pos--backend .o-prod__tabs,
+.odoo-pos--backend .o-prod__notes,
+.odoo-pos--backend .o-prod__field input,
+.odoo-pos--backend .o-prod__field select,
+.odoo-pos--backend .o-prod__field input[type="date"],
+.odoo-pos--backend .o-prod__field input[type="time"],
+.odoo-pos--backend .o-prod__field input[type="email"],
+.odoo-pos--backend .o-prod__field input[type="tel"],
+.odoo-pos--backend .o-prod__field input[type="number"],
+.odoo-pos--backend .gk-lines input {
+  border-color: #2e2e2e;
+  border-bottom-color: #2e2e2e;
+  background: transparent;
+}
+
+.odoo-pos--backend .o-prod__title {
+  border-bottom-color: #8b1219;
+}
+
+.odoo-pos--backend .o-prod__field input:focus,
+.odoo-pos--backend .o-prod__money:focus-within,
+.odoo-pos--backend .o-prod__tabs button.is-on {
+  border-bottom-color: #8b1219;
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .o-prod__pager button,
+.odoo-pos--backend .o-prod__doc,
+.odoo-pos--backend .o-prod__chatter-actions button,
+.odoo-pos--backend .o-prod__tabs button,
+.odoo-pos--backend .o-ings button {
+  background: #111111;
+  border-color: #2e2e2e;
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .o-ings button.is-on,
+.odoo-pos--backend .o-prod__chatter-actions button.is-on {
+  background: #8b1219;
+  border-color: #8b1219;
+  color: #ffffff;
+}
+
+.odoo-pos--backend .o-prod__photo {
+  background: #111111;
+  border-color: #2e2e2e;
+}
+
+.odoo-pos.odoo-pos--backend .gk-btn:focus-visible {
+  outline-color: #8b1219;
+}
+
+.odoo-pos--backend .gk-check,
+.odoo-pos--backend .o-be-table__check input {
+  accent-color: #8b1219;
+}
+
+.odoo-pos--backend .gk-pill {
+  background: #2a2a2a;
+  color: #b5b5b5;
+}
+
+.odoo-pos--backend .gk-pill.is-confirmed,
+.odoo-pos--backend .gk-pill.is-booked {
+  background: #3a1214;
+  color: #e8a0a4;
+}
+
+.odoo-pos--backend .gk-pill.is-checked_in,
+.odoo-pos--backend .gk-pill.is-active {
+  background: #143a18;
+  color: #9fd4a3;
+}
+
+.odoo-pos--backend .gk-pill.is-completed {
+  background: #24183a;
+  color: #c4b3e8;
+}
+
+.odoo-pos--backend .gk-pill.is-cancelled,
+.odoo-pos--backend .gk-pill.is-no_show,
+.odoo-pos--backend .gk-pill.is-full {
+  background: #3a1414;
+  color: #e8a0a0;
+}
+
+.odoo-pos--backend .gk-pill.is-closed {
+  background: #2a2a2a;
+  color: #b5b5b5;
+}
+
+.odoo-pos--backend .gk-stages .gk-pill:not(.is-on) {
+  background: #1a1a1a;
+  color: #8a8a8a;
+}
+
+.odoo-pos--backend .gk-toolbar .gk-stages .gk-pill.is-on:not(.is-booked):not(.is-active):not(.is-completed):not(.is-cancelled) {
+  background: #8b1219;
+  color: #ffffff;
+}
+
+.odoo-pos--backend .o-track__stat.is-blue strong {
+  color: #e8a0a4;
+}
+
+.odoo-pos--backend .gk-slot.is-held {
+  background: #8b1219;
+  border-color: #8b1219;
+}
+
+.odoo-pos--backend .gk-shift dl {
+  border-color: #2e2e2e;
+}
+
+.odoo-pos--backend .gk-agenda h3 {
+  color: #b5b5b5;
+}
+
+.odoo-pos--backend .gk-agenda ul {
+  background: #111111;
+  border-color: #2e2e2e;
+}
+
+.odoo-pos--backend .gk-agenda li + li {
+  border-top-color: #2e2e2e;
+}
+
+.odoo-pos--backend .gk-agenda button {
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .gk-agenda button:hover:not(:disabled) {
+  background: #1a1a1a;
+}
+
+.odoo-pos--backend .gk-agenda span,
+.odoo-pos--backend .gk-agenda em {
+  color: #b5b5b5;
+}
+
+.odoo-pos--backend .o-search {
+  background: #000000;
+  border-color: #2e2e2e;
+  color: #9a9a9a;
+}
+
+.odoo-pos--backend .o-search input {
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .gk-config {
+  max-width: 560px;
+  padding: 18px 18px 16px;
+  background: #111111;
+  border: 1px solid #2e2e2e;
+  border-radius: 8px;
+  color: #f0f0f0;
+}
+
+.odoo-pos--backend .gk-config h2 {
+  margin: 0 0 16px;
+  font: 600 18px/1.3 "Inter", var(--o-font);
+  color: #f3f3f3;
+}
+
+.odoo-pos--backend .gk-config .o-field {
+  margin-bottom: 14px;
+}
+
+.odoo-pos--backend .gk-config .o-field label {
+  color: #b5b5b5;
+}
+
+.odoo-pos--backend .gk-config .o-field input {
+  color: #f0f0f0;
+  border-bottom-color: #2e2e2e;
+}
+
+.odoo-pos--backend .gk-config p {
+  margin: 4px 0 0;
+  color: #b5b5b5;
+  font-size: 13px;
+}
+
+html:has(.o-login),
+body:has(.o-login),
+.o-login {
+  background-color: #0a0a0a;
+  background-image: url("/ui/grain-dark.png?v=2");
+  background-repeat: repeat;
+  background-size: 160px 940px;
+  background-blend-mode: overlay;
+  color: #f0f0f0;
+  color-scheme: dark;
+  scrollbar-color: #1a1a1a #000000;
+}
+
+.o-login__card {
+  background: #111111;
+  border-color: #2e2e2e;
+  color: #f0f0f0;
+}
+
+.o-login h1,
+.o-login__toggle {
+  color: #f3f3f3;
+}
+
+.o-login__eyebrow,
+.o-login__hint,
+.o-login__foot,
+.o-login__field,
+.o-login__card--busy {
+  color: #b5b5b5;
+}
+
+.o-login__field input {
+  background: #000000;
+  border-color: #2e2e2e;
+  color: #f0f0f0;
+}
+
+.o-login__field input:focus {
+  border-color: #8b1219;
+  box-shadow: 0 0 0 3px rgba(139, 18, 25, 0.22);
+}
+
+.o-login__logo {
+  filter: invert(1);
+}
+
+.odoo-pos--backend .gk-dash .o-track__kpis span,
+.odoo-pos--backend .gk-dash .o-track__kpis em,
+.odoo-pos--backend .gk-dash .o-track__card h3,
+.odoo-pos--backend .gk-dash .o-track__stat span,
+.odoo-pos--backend .gk-dash .o-track__stat em,
+.odoo-pos--backend .gk-dash .o-track__bars small,
+.odoo-pos--backend .gk-dash .o-track__table th,
+.odoo-pos--backend .gk-dash .gk-board-card span,
+.odoo-pos--backend .gk-dash .gk-board-card em {
+  color: #b5b5b5;
+}
+
+.gk-dash .o-track__kpis article {
+  position: relative;
+  padding-right: 68px;
+  min-height: 88px;
+}
+
+.gk-kpi-icon {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.gk-pill.is-closed {
+  background: #eceff1;
+  color: #546e7a;
+}
+
+.gk-pill.is-full {
+  background: #fdecea;
+  color: #c62828;
 }

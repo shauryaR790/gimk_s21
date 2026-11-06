@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useOutletContext } from 'react-router-dom';
+import type { BackendChromeContext } from '../odoo/OdooBackendLayout';
 import { api } from '../../../lib/api';
+import { readIdImage } from '../../../lib/idImage';
 import { useTitle } from '../../../lib/useTitle';
 import { usePos } from '../PosContext';
 
@@ -117,30 +119,7 @@ export function Dropdown({
   );
 }
 
-export async function readIdImage(file: File) {
-  const source = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.onerror = () => reject(new Error('Could not read that file.'));
-    reader.readAsDataURL(file);
-  });
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('That file is not an image.'));
-    img.src = source;
-  });
-  const scale = Math.min(1, 900 / Math.max(image.naturalWidth, image.naturalHeight, 1));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-  const context = canvas.getContext('2d');
-  if (!context) return source;
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.82);
-}
+export { readIdImage };
 
 export type Pager = { index: number; total: number; prev?: string; next?: string };
 
@@ -156,13 +135,68 @@ export function pagerFor(ids: string[], id: string | undefined, base: string): P
   };
 }
 
+export const BOOKING_STAGES = [
+  { id: 'CONFIRMED', label: 'Booked' },
+  { id: 'CHECKED_IN', label: 'Active' },
+  { id: 'COMPLETED', label: 'Completed' },
+  { id: 'CANCELLED', label: 'Cancelled' },
+] as const;
+
 export const BOOKING_STATUS: Record<string, string> = {
-  CONFIRMED: 'Confirmed',
-  CHECKED_IN: 'Checked in',
-  COMPLETED: 'Done',
+  CONFIRMED: 'Booked',
+  CHECKED_IN: 'Active',
+  COMPLETED: 'Completed',
   CANCELLED: 'Cancelled',
   NO_SHOW: 'No-show',
 };
+
+export function bookingStageClass(status: string) {
+  if (status === 'CONFIRMED') return 'is-booked';
+  if (status === 'CHECKED_IN') return 'is-active';
+  if (status === 'COMPLETED') return 'is-completed';
+  if (status === 'CANCELLED' || status === 'NO_SHOW') return 'is-cancelled';
+  return '';
+}
+
+export function BookingStages({
+  status,
+  onPick,
+}: {
+  status: string;
+  onPick?: (next: string) => void;
+}) {
+  const current = status === 'NO_SHOW' ? 'CANCELLED' : status;
+  return (
+    <div className="gk-stages" role="group" aria-label="Booking status">
+      {BOOKING_STAGES.map((stage) => {
+        const on = current === stage.id;
+        const pickable = Boolean(onPick) && !on;
+        if (!onPick) {
+          return (
+            <span key={stage.id} className={`gk-pill ${bookingStageClass(stage.id)}${on ? ' is-on' : ''}`}>
+              {stage.label}
+            </span>
+          );
+        }
+        return (
+          <button
+            key={stage.id}
+            type="button"
+            className={`gk-pill ${bookingStageClass(stage.id)}${on ? ' is-on' : ''}${pickable ? ' is-pick' : ''}`}
+            disabled={!pickable}
+            aria-current={on ? 'step' : undefined}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (pickable) onPick(stage.id);
+            }}
+          >
+            {stage.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 const ACTION_TEXT: Record<string, string> = {
   CREATE_BOOKING: 'Booking created',
@@ -184,6 +218,13 @@ const ACTION_TEXT: Record<string, string> = {
   EDIT_TASK: 'Task updated',
   TASK_DONE: 'Task done',
   ADD_CLASS: 'Class created',
+  JOIN_REQUEST: 'Request received',
+  JOIN_UPDATED: 'Applicant updated the request',
+  JOIN_EDIT: 'Details updated',
+  JOIN_PAID: 'Paid',
+  JOIN_CONTACTED: 'Contacted',
+  JOIN_APPROVED: 'Approved',
+  JOIN_DECLINED: 'Declined',
   NOTE: 'Note',
   MESSAGE: 'Message',
   ACTIVITY: 'Activity',
@@ -350,6 +391,7 @@ export function RecordForm({
   refreshKey?: number;
 }) {
   const navigate = useNavigate();
+  const { setListPath, setPager, setPagerLabel } = useOutletContext<BackendChromeContext>();
   useTitle(name.trim() || `New ${kind.toLowerCase()}`);
   const [tab, setTab] = useState(tabs[0]?.id ?? 'general');
   const starKey = `gk-star:${kind}:${recordId ?? 'new'}`;
@@ -363,6 +405,26 @@ export function RecordForm({
   useEffect(() => {
     if (!tabs.some((entry) => entry.id === tab)) setTab(tabs[0]?.id ?? 'general');
   }, [tabs, tab]);
+
+  useEffect(() => {
+    setListPath(crumb.to);
+    if (pager) {
+      setPagerLabel(`${pager.index + 1} / ${pager.total}`);
+      setPager({
+        canPrev: Boolean(pager.prev),
+        canNext: Boolean(pager.next),
+        onPrev: () => pager.prev && navigate(pager.prev),
+        onNext: () => pager.next && navigate(pager.next),
+      });
+    } else {
+      setPagerLabel('1-1 / 1');
+      setPager(null);
+    }
+    return () => {
+      setListPath(null);
+      setPager(null);
+    };
+  }, [crumb.to, navigate, pager, setListPath, setPager, setPagerLabel]);
 
   const active = tabs.find((entry) => entry.id === tab) ?? tabs[0];
 

@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { formatINR } from '../../../../shared/domain';
+import { SIGNUP_ACTIVITIES } from '../../../../shared/activities';
+import { slotLabel, summarizeSlots } from '../../../../shared/slots';
+import { TASK_CATEGORIES, TASK_PRIORITIES } from '../../../../shared/maintenance';
+import { SlotGrid, type HeldSlot } from './slots';
 import { api } from '../../../lib/api';
+import { readIdImage } from '../../../lib/idImage';
 import { pushToast } from '../../../components/Toast';
 import { usePos } from '../PosContext';
 import {
   BOOKING_STATUS,
+  BookingStages,
   Choice,
   Dropdown,
   Field,
@@ -18,7 +24,7 @@ import {
   type Option,
 } from './record';
 
-type Trainer = { id: string; name: string; phone: string; email: string; specialization: string; availability: string; isActive?: boolean };
+type Trainer = { id: string; name: string; phone: string; email: string; specialization: string; availability: string; isActive?: boolean; freeSlots?: string[] };
 type Plan = { id: string; name: string; durationDays: number; price: number; description: string; facilityAccess: string; bookingPrivileges: string; discountBps: number; guestPasses: number; renewalDays: number; freezeDays: number; isActive: boolean };
 type Facility = {
   id: string;
@@ -48,6 +54,7 @@ type Member = {
   accessInterest?: string;
   govtIdLabel?: string;
   govtIdUrl?: string;
+  photoUrl?: string;
   coachId?: string;
   coachName?: string;
   notes?: string;
@@ -173,7 +180,7 @@ export function VisitorRecordPage() {
     setEmail(data.member.email);
     setAccess(data.member.accessInterest ?? '');
     setGovt(data.member.govtIdLabel ?? '');
-    setPhoto(data.member.govtIdUrl ?? '');
+    setPhoto(data.member.photoUrl || data.member.govtIdUrl || '');
     setCoachId(data.member.coachId ?? '');
     setNotes(data.member.notes ?? '');
     const prefs = (data.member.notifyPrefs ?? 'sms,email').split(',');
@@ -213,7 +220,8 @@ export function VisitorRecordPage() {
         email,
         accessInterest: access,
         govtIdLabel: govt,
-        govtIdUrl: photo,
+        govtIdUrl: member?.govtIdUrl || '',
+        photoUrl: photo,
         coachId,
         notes,
         notifyPrefs: [sms ? 'sms' : '', mail ? 'email' : ''].filter(Boolean).join(','),
@@ -266,7 +274,7 @@ export function VisitorRecordPage() {
         { label: 'SMS updates', checked: sms, onChange: setSms },
         { label: 'Email updates', checked: mail, onChange: setMail },
       ]}
-      photo={{ url: photo, label: 'Government ID photo', onChange: (url, fileName) => { setPhoto(url); setGovt((current) => current || fileName.replace(/\.[^.]+$/, '')); } }}
+      photo={{ url: photo, label: 'Photograph', onChange: (url) => setPhoto(url) }}
       documents={photo ? 1 : 0}
       pager={pagerFor(people.map((row) => row.id), id, '/pos/backend/visitors')}
       tabs={[
@@ -449,15 +457,20 @@ export function TrainerRecordPage() {
   const [solo, setSolo] = useState(true);
   const [classes, setClasses] = useState<{ id: string; name: string; category: string; schedule: string; capacity: number }[]>([]);
   const [sessions, setSessions] = useState<{ id: string; date: string; startTime: string; minutes: number; activity: string; kind: string; people: number; amount: number }[]>([]);
+  const [freeSlots, setFreeSlots] = useState<string[]>([]);
+  const [heldSlots, setHeldSlots] = useState<HeldSlot[]>([]);
   const trainers = useList<Trainer>('/api/gym/trainers', (data) => (data as { trainers: Trainer[] }).trainers);
 
   const load = useCallback(async () => {
     if (isNew) return;
     const data = await api<{
-      trainer: Trainer & { govtIdLabel: string; govtIdUrl: string; notes: string; offers: string; isActive: boolean };
+      trainer: Trainer & { govtIdLabel: string; govtIdUrl: string; notes: string; offers: string; isActive: boolean; freeSlots: string[] };
       classes: typeof classes;
       sessions: typeof sessions;
+      heldSlots: HeldSlot[];
     }>(`/api/gym/trainers/${id}`);
+    setFreeSlots(data.trainer.freeSlots);
+    setHeldSlots(data.heldSlots);
     setName(data.trainer.name);
     setPhone(data.trainer.phone);
     setEmail(data.trainer.email);
@@ -491,6 +504,7 @@ export function TrainerRecordPage() {
         notes,
         isActive: active,
         offers: [group ? 'group' : '', solo ? 'private' : ''].filter(Boolean).join(','),
+        freeSlots,
       };
       if (isNew) {
         const created = await api<{ trainer: { id: string } }>('/api/gym/trainers', { method: 'POST', body: JSON.stringify(body) });
@@ -533,7 +547,11 @@ export function TrainerRecordPage() {
                   <Field label="Phone" required><input type="tel" value={phone} aria-label="Phone" placeholder="98222 22201" onChange={(event) => setPhone(event.target.value)} /></Field>
                   <Field label="Email"><input type="email" value={email} aria-label="Email" onChange={(event) => setEmail(event.target.value)} /></Field>
                   <Field label="Sport" required><input value={sport} aria-label="Sport" placeholder="Badminton" onChange={(event) => setSport(event.target.value)} /></Field>
-                  <Field label="Hours"><input value={hours} aria-label="Hours" placeholder="Mon–Sat 06:00–11:00" onChange={(event) => setHours(event.target.value)} /></Field>
+                  <Field label="Hours">
+                    {freeSlots.length
+                      ? <strong className="gk-hours">{summarizeSlots(freeSlots)}</strong>
+                      : <input value={hours} aria-label="Hours" placeholder="Pick free slots in the Free slots tab" onChange={(event) => setHours(event.target.value)} />}
+                  </Field>
                 </>
               )}
               right={(
@@ -546,6 +564,11 @@ export function TrainerRecordPage() {
               )}
             />
           ),
+        },
+        {
+          id: 'slots',
+          label: 'Free slots',
+          content: <SlotGrid value={freeSlots} onChange={setFreeSlots} held={heldSlots} />,
         },
         {
           id: 'classes',
@@ -723,6 +746,7 @@ export function BookingRecordPage() {
   const [payNow, setPayNow] = useState(false);
   const [method, setMethod] = useState('CASH');
   const [notes, setNotes] = useState('');
+  const [status, setStatus] = useState('CONFIRMED');
   const [slots, setSlots] = useState<{ start: string; end: string; free: boolean }[]>([]);
   const facilities = useList<Facility>('/api/gym/facilities', (data) => (data as { facilities: Facility[] }).facilities);
   const members = useList<Member>('/api/gym/members', (data) => (data as { members: Member[] }).members);
@@ -742,6 +766,7 @@ export function BookingRecordPage() {
     setDuration(String(Math.round((new Date(row.endAt).getTime() - new Date(row.startAt).getTime()) / 60000)));
     setPeople(String(row.participants));
     setNotes(row.notes);
+    setStatus(row.status);
   }, [id, isNew]);
 
   useEffect(() => {
@@ -786,7 +811,6 @@ export function BookingRecordPage() {
 
   const count = Math.max(1, Math.round(toNumber(people)) || 1);
   const unit = facility ? (member?.isMember ? facility.memberPrice : facility.guestPrice) : 0;
-  const open = booking ? ['CONFIRMED', 'CHECKED_IN'].includes(booking.status) : true;
 
   function submit() {
     void save(async () => {
@@ -814,18 +838,9 @@ export function BookingRecordPage() {
       }
       await api(`/api/gym/bookings/${id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ facilityId, startAt, participants: count, memberName: name, memberMobile: mobile, notes }),
+        body: JSON.stringify({ facilityId, startAt, participants: count, memberName: name, memberMobile: mobile, notes, status }),
       });
-      pushToast('Booking saved');
-      await load();
-      setRefreshKey((value) => value + 1);
-    });
-  }
-
-  function setStatus(next: string) {
-    void save(async () => {
-      await api(`/api/gym/bookings/${id}/status`, { method: 'POST', body: JSON.stringify({ status: next }) });
-      pushToast(next === 'CANCELLED' ? 'Booking cancelled' : 'Booking updated');
+      pushToast(status === 'CANCELLED' ? 'Booking cancelled' : 'Booking saved');
       await load();
       setRefreshKey((value) => value + 1);
     });
@@ -844,14 +859,6 @@ export function BookingRecordPage() {
       flags={isNew ? [{ label: 'Take payment now', checked: payNow, onChange: setPayNow }] : undefined}
       pager={pagerFor(all.map((row) => row.id), id, '/pos/backend/bookings')}
       saveLabel={isNew ? 'Reserve slot' : 'Save'}
-      actions={!isNew && open ? (
-        <>
-          {booking?.status === 'CONFIRMED' ? <button type="button" className="gk-btn" disabled={busy} onClick={() => setStatus('CHECKED_IN')}>Check in</button> : null}
-          <button type="button" className="gk-btn" disabled={busy} onClick={() => setStatus('COMPLETED')}>Done</button>
-          <button type="button" className="gk-btn" disabled={busy} onClick={() => setStatus('NO_SHOW')}>No-show</button>
-          <button type="button" className="gk-btn" disabled={busy} onClick={() => setStatus('CANCELLED')}>Cancel booking</button>
-        </>
-      ) : null}
       tabs={[
         {
           id: 'general',
@@ -881,7 +888,7 @@ export function BookingRecordPage() {
                   {isNew ? (
                     <Choice label="Payment" required={payNow} name="booking-pay" value={method} disabled={!payNow} options={[{ value: 'CASH', label: 'Cash' }, { value: 'UPI', label: 'UPI' }, { value: 'CARD', label: 'Card' }]} onChange={setMethod} />
                   ) : (
-                    <Field label="Status"><strong>{booking ? BOOKING_STATUS[booking.status] ?? booking.status : '—'}</strong></Field>
+                    <Field label="Status"><BookingStages status={status} onPick={setStatus} /></Field>
                   )}
                 </>
               )}
@@ -929,7 +936,21 @@ export function BookingRecordPage() {
   );
 }
 
-type Task = { id: string; title: string; notes: string; status: string; starts_at: string; ends_at: string | null; actor?: string; facility: string; facility_id: string };
+type Task = {
+  id: string;
+  title: string;
+  notes: string;
+  status: string;
+  starts_at: string;
+  ends_at: string | null;
+  actor?: string;
+  facility: string;
+  facility_id: string;
+  category: string;
+  priority: string;
+  assigned_to: string;
+  cost: number;
+};
 
 export function MaintenanceRecordPage() {
   const { id } = useParams();
@@ -941,6 +962,10 @@ export function MaintenanceRecordPage() {
   const [title, setTitle] = useState('');
   const [facilityId, setFacilityId] = useState('');
   const [notes, setNotes] = useState('');
+  const [category, setCategory] = useState('Repair');
+  const [priority, setPriority] = useState('NORMAL');
+  const [assignedTo, setAssignedTo] = useState('');
+  const [cost, setCost] = useState('');
   const [block, setBlock] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
   const facilities = useList<Facility>('/api/gym/facilities', (data) => (data as { facilities: Facility[] }).facilities);
@@ -954,6 +979,10 @@ export function MaintenanceRecordPage() {
     setTitle(task.title);
     setFacilityId(task.facility_id);
     setNotes(task.notes);
+    setCategory(task.category);
+    setPriority(task.priority);
+    setAssignedTo(task.assigned_to);
+    setCost(task.cost ? String(task.cost) : '');
   }, [id, isNew]);
 
   useEffect(() => {
@@ -966,13 +995,16 @@ export function MaintenanceRecordPage() {
     void save(async () => {
       if (!facilityId) throw new Error('Choose the facility.');
       if (!title.trim()) throw new Error('Enter the task.');
+      const spent = cost.trim() ? toNumber(cost) : 0;
+      if (!Number.isFinite(spent) || spent < 0) throw new Error('Enter the cost in rupees.');
+      const details = { facilityId, title, notes, category, priority, assignedTo, cost: Math.round(spent) };
       if (isNew) {
-        const created = await api<{ id: string }>('/api/gym/maintenance', { method: 'POST', body: JSON.stringify({ facilityId, title, notes, block }) });
+        const created = await api<{ id: string }>('/api/gym/maintenance', { method: 'POST', body: JSON.stringify({ ...details, block }) });
         pushToast('Task added');
         navigate(`/pos/backend/maintenance/${created.id}`, { replace: true });
         return;
       }
-      await api(`/api/gym/maintenance/${id}`, { method: 'PATCH', body: JSON.stringify({ facilityId, title, notes }) });
+      await api(`/api/gym/maintenance/${id}`, { method: 'PATCH', body: JSON.stringify(details) });
       pushToast('Task saved');
       await load();
       setRefreshKey((value) => value + 1);
@@ -1010,13 +1042,21 @@ export function MaintenanceRecordPage() {
                   <Field label="Facility" required>
                     <Dropdown variant="field" label="Facility" value={facilityId} placeholder="Choose a facility" options={facilities.map((row) => ({ value: row.id, label: row.name }))} onChange={setFacilityId} />
                   </Field>
-                  <Field label="Raised by"><strong>{task?.actor || pos.user?.name || 'Staff'}</strong></Field>
+                  <Field label="Kind of work">
+                    <Dropdown variant="field" label="Kind of work" value={category} options={TASK_CATEGORIES.map((value) => ({ value, label: value }))} onChange={setCategory} />
+                  </Field>
+                  <Field label="Priority">
+                    <Dropdown variant="field" label="Priority" value={priority} options={TASK_PRIORITIES.map((row) => ({ value: row.value, label: row.label }))} onChange={setPriority} />
+                  </Field>
+                  <Field label="Assigned to"><input value={assignedTo} aria-label="Assigned to" placeholder="Staff member or vendor" onChange={(event) => setAssignedTo(event.target.value)} /></Field>
                 </>
               )}
               right={(
                 <>
+                  <Field label="Raised by"><strong>{task?.actor || pos.user?.name || 'Staff'}</strong></Field>
                   <Field label="Started"><strong>{task ? stamp(task.starts_at) : 'When you save'}</strong></Field>
                   <Field label="Status"><strong>{task ? (task.status === 'OPEN' ? 'Open' : `Done ${stamp(task.ends_at)}`) : 'Open'}</strong></Field>
+                  <Field label="Cost" suffix="parts and labour"><Money value={cost} label="Cost" onChange={setCost} /></Field>
                 </>
               )}
             />
@@ -1522,6 +1562,356 @@ export function InventoryRecordPage() {
       busy={busy}
       onSave={submit}
       onDiscard={() => (isNew ? navigate('/pos/backend/inventory') : void load())}
+    />
+  );
+}
+
+export type JoinRequest = {
+  id: string;
+  ref: string;
+  sport: string;
+  name: string;
+  mobile: string;
+  email: string;
+  dob: string;
+  age: number | null;
+  govtIdLabel: string;
+  govtIdUrl: string;
+  hasIdPhoto: boolean;
+  wantsTrainer: boolean;
+  route: 'TRAINER' | 'STAFF';
+  trainerId: string;
+  trainerName: string;
+  trainerPhone: string;
+  preferredSlot: string;
+  preferredSlotLabel: string;
+  planId: string;
+  planName: string;
+  planDays: number;
+  amount: number;
+  paymentStatus: string;
+  paymentMethod: string;
+  orderNumber: number | null;
+  customerId: string;
+  status: string;
+  handledBy: string;
+  notes: string;
+  pincode: string;
+  photoUrl: string;
+  hasPortrait: boolean;
+  hasPassword: boolean;
+  isMember: boolean;
+  becomeMember: boolean;
+  createdAt: string;
+};
+
+export const JOIN_STATUS: Record<string, string> = { NEW: 'New', CONTACTED: 'Contacted', APPROVED: 'Approved', DECLINED: 'Declined' };
+
+export function joinPayment(row: Pick<JoinRequest, 'paymentStatus' | 'paymentMethod' | 'orderNumber'>) {
+  if (row.paymentStatus === 'PAID') return `Paid · ${row.paymentMethod || 'Desk'}${row.orderNumber ? ` · bill ${row.orderNumber}` : ''}`;
+  if (row.paymentStatus === 'REFUNDED') return 'Refunded';
+  return 'Due at desk';
+}
+
+export function JoinRequestRecordPage({ route }: { route: 'TRAINER' | 'STAFF' }) {
+  const { id = '' } = useParams();
+  const navigate = useNavigate();
+  const base = route === 'TRAINER' ? '/pos/backend/trainer-requests' : '/pos/backend/membership-requests';
+  const { busy, error, setError, save } = useSaver();
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [request, setRequest] = useState<JoinRequest | null>(null);
+  const [name, setName] = useState('');
+  const [mobile, setMobile] = useState('');
+  const [email, setEmail] = useState('');
+  const [dob, setDob] = useState('');
+  const [govt, setGovt] = useState('');
+  const [photo, setPhoto] = useState('');
+  const [idShot, setIdShot] = useState('');
+  const [sport, setSport] = useState('');
+  const [wantsTrainer, setWantsTrainer] = useState(false);
+  const [trainerId, setTrainerId] = useState('');
+  const [slot, setSlot] = useState('');
+  const [planId, setPlanId] = useState('');
+  const [notes, setNotes] = useState('');
+  const [pincode, setPincode] = useState('');
+  const [isMember, setIsMember] = useState(false);
+  const [becomeMember, setBecomeMember] = useState(false);
+  const [method, setMethod] = useState('');
+  const [confirmDecline, setConfirmDecline] = useState(false);
+  const trainers = useList<Trainer>('/api/gym/trainers', (data) => (data as { trainers: Trainer[] }).trainers);
+  const plans = useList<Plan>('/api/gym/plans', (data) => (data as { plans: Plan[] }).plans);
+  const facilities = useList<Facility>('/api/gym/facilities', (data) => (data as { facilities: Facility[] }).facilities);
+  const siblings = useList<JoinRequest>(`/api/gym/join-requests?route=${route}`, (data) => (data as { requests: JoinRequest[] }).requests);
+
+  const fill = useCallback((row: JoinRequest) => {
+    setRequest(row);
+    setName(row.name);
+    setMobile(row.mobile);
+    setEmail(row.email);
+    setDob(row.dob);
+    setGovt(row.govtIdLabel);
+    setPhoto(row.photoUrl);
+    setIdShot(row.govtIdUrl);
+    setSport(row.sport);
+    setWantsTrainer(row.wantsTrainer);
+    setTrainerId(row.trainerId);
+    setSlot(row.preferredSlot);
+    setPlanId(row.planId);
+    setNotes(row.notes);
+    setPincode(row.pincode);
+    setIsMember(row.isMember);
+    setBecomeMember(row.becomeMember);
+  }, []);
+
+  const load = useCallback(async () => {
+    const data = await api<{ request: JoinRequest }>(`/api/gym/join-requests/${id}`);
+    fill(data.request);
+    setRefreshKey((value) => value + 1);
+  }, [fill, id]);
+
+  useEffect(() => {
+    setConfirmDecline(false);
+    void load().catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load this request.'));
+  }, [load, setError]);
+
+  useEffect(() => {
+    if (!confirmDecline) return;
+    const timer = window.setTimeout(() => setConfirmDecline(false), 4000);
+    return () => window.clearTimeout(timer);
+  }, [confirmDecline]);
+
+  const open = request ? request.status === 'NEW' || request.status === 'CONTACTED' : false;
+  const paid = request?.paymentStatus === 'PAID';
+  const sportOptions = useMemo(() => {
+    const names = [...new Set([...SIGNUP_ACTIVITIES, ...facilities.map((row) => row.sport.trim()).filter(Boolean)])].sort();
+    return names.map((value) => ({ value, label: value }));
+  }, [facilities]);
+  const trainer = trainers.find((row) => row.id === trainerId);
+  const trainerChoices: Option[] = [
+    { value: '', label: 'Any trainer' },
+    ...[...trainers]
+      .filter((row) => row.isActive !== false)
+      .sort((a, b) => Number(b.specialization.toLowerCase() === sport.toLowerCase()) - Number(a.specialization.toLowerCase() === sport.toLowerCase()) || a.name.localeCompare(b.name))
+      .map((row) => ({ value: row.id, label: `${row.name} · ${row.specialization}` })),
+  ];
+  const slotChoices: Option[] = [
+    { value: '', label: 'No preference' },
+    ...(trainer?.freeSlots ?? []).map((value) => ({ value, label: slotLabel(value) })),
+    ...(slot && !(trainer?.freeSlots ?? []).includes(slot) ? [{ value: slot, label: `${slotLabel(slot)} · not free` }] : []),
+  ];
+  const plan = plans.find((row) => row.id === planId);
+
+  function submit() {
+    void save(async () => {
+      const data = await api<{ request: JoinRequest }>(`/api/gym/join-requests/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name, mobile, email, dob, pincode, govtIdLabel: govt, govtIdUrl: idShot, photoUrl: photo, sport, wantsTrainer, trainerId, preferredSlot: slot, planId, isMember, becomeMember, notes }),
+      });
+      pushToast('Request saved');
+      fill(data.request);
+      setRefreshKey((value) => value + 1);
+      if (data.request.route !== route) {
+        navigate(`${data.request.route === 'TRAINER' ? '/pos/backend/trainer-requests' : '/pos/backend/membership-requests'}/${id}`, { replace: true });
+      }
+    });
+  }
+
+  function act(path: string, body: Record<string, unknown>, done: string) {
+    void save(async () => {
+      const data = await api<{ request: JoinRequest; note?: string }>(`/api/gym/join-requests/${id}/${path}`, { method: 'POST', body: JSON.stringify(body) });
+      pushToast(data.note || done);
+      fill(data.request);
+      setRefreshKey((value) => value + 1);
+    });
+  }
+
+  const actions = request ? (
+    <>
+      {request.status === 'NEW' ? <button type="button" className="gk-btn" disabled={busy} onClick={() => act('contacted', {}, 'Marked contacted')}>Mark contacted</button> : null}
+      {open ? (
+        <button
+          type="button"
+          className="gk-btn"
+          disabled={busy}
+          onClick={() => {
+            if (!paid && !method) {
+              setError('Not paid yet. Pick cash, UPI or card in "Take payment by" on General Information, then approve.');
+              return;
+            }
+            act('approve', { method, notes }, 'Approved · membership is active');
+          }}
+        >
+          Approve
+        </button>
+      ) : null}
+      {open ? (
+        <button
+          type="button"
+          className="gk-btn"
+          disabled={busy}
+          onClick={() => {
+            if (!confirmDecline) {
+              setConfirmDecline(true);
+              return;
+            }
+            setConfirmDecline(false);
+            act('decline', { reason: notes.split('\n')[0] ?? '', notes }, 'Request declined');
+          }}
+        >
+          {confirmDecline ? (paid ? 'Confirm decline & refund' : 'Confirm decline') : 'Decline'}
+        </button>
+      ) : null}
+      {request.status === 'APPROVED' && request.customerId ? <button type="button" className="gk-btn" onClick={() => navigate(`/pos/backend/visitors/${request.customerId}`)}>Open visitor</button> : null}
+    </>
+  ) : null;
+
+  const tabs = [
+    {
+      id: 'general',
+      label: 'General Information',
+      content: (
+        <Grid
+          left={(
+            <>
+              <Field label="Phone" required>
+                <input type="tel" value={mobile} aria-label="Phone" onChange={(event) => setMobile(event.target.value)} />
+                {mobile ? <a className="gk-link" href={`tel:+91${mobile.replace(/\D/g, '').slice(-10)}`}>Call</a> : null}
+              </Field>
+              <Field label="Email" required>
+                <input type="email" value={email} aria-label="Email" onChange={(event) => setEmail(event.target.value)} />
+                {email ? <a className="gk-link" href={`mailto:${email}`}>Email</a> : null}
+              </Field>
+              <Field label="Login password"><strong>{request?.hasPassword ? 'Set on website' : 'Not set'}</strong></Field>
+              <Field label="Pincode"><input inputMode="numeric" value={pincode} aria-label="Pincode" onChange={(event) => setPincode(event.target.value)} /></Field>
+              <Field label="Date of birth" required suffix={request?.age != null ? `${request.age} yrs` : undefined}>
+                <input type="date" value={dob} aria-label="Date of birth" onChange={(event) => setDob(event.target.value)} />
+              </Field>
+              <Field label="Government ID" required>
+                <input value={govt} aria-label="Government ID" onChange={(event) => setGovt(event.target.value)} />
+                {idShot ? <img className="gk-id" src={idShot} alt="Government ID" /> : null}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  aria-label="Government ID photo"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (!file) return;
+                    void readIdImage(file).then(setIdShot).catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not read that photo.'));
+                  }}
+                />
+              </Field>
+              <Field label="Sport" required>
+                <Dropdown variant="field" label="Sport" value={sport} options={sportOptions} onChange={setSport} disabled={!open} />
+              </Field>
+            </>
+          )}
+          right={(
+            <>
+              <Field label="Plan" required>
+                <Dropdown
+                  variant="field"
+                  label="Plan"
+                  value={planId}
+                  options={plans.filter((row) => row.isActive || row.id === planId).map((row) => ({ value: row.id, label: `${row.name} · ${row.durationDays} days` }))}
+                  onChange={setPlanId}
+                  disabled={!open || paid}
+                />
+              </Field>
+              <Field label="Amount"><strong>{request ? formatINR(request.amount) : '—'}</strong>{plan && request && plan.price !== request.amount ? <em>incl. tax</em> : null}</Field>
+              <Field label="Payment"><strong>{request ? joinPayment(request) : '—'}</strong></Field>
+              {open && !paid ? (
+                <Field label="Take payment by">
+                  <Dropdown
+                    variant="field"
+                    label="Take payment by"
+                    value={method}
+                    placeholder="Cash, UPI or card"
+                    options={[{ value: 'CASH', label: 'Cash' }, { value: 'UPI', label: 'UPI' }, { value: 'CARD', label: 'Card' }]}
+                    onChange={setMethod}
+                  />
+                </Field>
+              ) : null}
+              <Field label="Status"><span className={`gk-pill is-join-${(request?.status ?? 'new').toLowerCase()}`}>{JOIN_STATUS[request?.status ?? ''] ?? '—'}</span></Field>
+            </>
+          )}
+        />
+      ),
+    },
+    ...(wantsTrainer ? [{
+      id: 'trainer',
+      label: 'Trainer',
+      content: (
+        <Grid
+          left={(
+            <>
+              <Field label="Trainer" required>
+                <Dropdown variant="field" label="Trainer" value={trainerId} options={trainerChoices} onChange={(value) => { setTrainerId(value); setSlot(''); }} disabled={!open} />
+              </Field>
+              <Field label="Preferred time">
+                <Dropdown variant="field" label="Preferred time" value={slot} options={slotChoices} onChange={setSlot} disabled={!open || !trainerId} />
+              </Field>
+            </>
+          )}
+          right={(
+            <>
+              <Field label="Trainer phone">
+                {trainer?.phone ? <><strong>{trainer.phone}</strong><a className="gk-link" href={`tel:+91${trainer.phone}`}>Call</a></> : <strong>—</strong>}
+              </Field>
+              <Field label="Trainer hours"><strong className="gk-hours">{trainer?.availability || '—'}</strong></Field>
+            </>
+          )}
+        />
+      ),
+    }] : []),
+    {
+      id: 'request',
+      label: 'Request',
+      content: (
+        <Grid
+          left={(
+            <>
+              <Field label="Reference"><strong>{request?.ref ?? '—'}</strong></Field>
+              <Field label="Received"><strong>{stamp(request?.createdAt)}</strong></Field>
+              <Field label="Sent to"><strong>{wantsTrainer ? 'Trainer requests' : 'Membership requests'}</strong></Field>
+            </>
+          )}
+          right={(
+            <>
+              <Field label="Handled by"><strong>{request?.handledBy || '—'}</strong></Field>
+              <Field label="Bill"><strong>{request?.orderNumber ? `#${request.orderNumber}` : '—'}</strong></Field>
+              <Field label="Visitor record"><strong>{request?.customerId ? 'Created' : 'On approval'}</strong></Field>
+            </>
+          )}
+        />
+      ),
+    },
+  ];
+
+  return (
+    <RecordForm
+      kind="Request"
+      recordId={id}
+      crumb={{ label: route === 'TRAINER' ? 'Trainer requests' : 'Membership requests', to: base }}
+      name={name}
+      onName={setName}
+      namePlaceholder="Applicant name"
+      flags={[
+        { label: 'Wants a trainer', checked: wantsTrainer, onChange: (checked) => { if (open) setWantsTrainer(checked); } },
+        { label: 'Already a member', checked: isMember, onChange: (checked) => { if (open) setIsMember(checked); } },
+        { label: 'Wants membership', checked: becomeMember, onChange: (checked) => { if (open) setBecomeMember(checked); } },
+      ]}
+      photo={{ url: photo, label: 'Photograph', onChange: (url) => setPhoto(url) }}
+      documents={(photo ? 1 : 0) + (idShot ? 1 : 0)}
+      pager={pagerFor(siblings.map((row) => row.id), id, base)}
+      tabs={tabs}
+      notes={{ value: notes, onChange: setNotes, placeholder: 'Call notes. The first line is saved as the reason if you decline.' }}
+      error={error}
+      busy={busy}
+      onSave={submit}
+      onDiscard={() => void load()}
+      actions={actions}
+      refreshKey={refreshKey}
     />
   );
 }

@@ -83,7 +83,7 @@ export function LoginPage() {
     return (
       <main className="odoo-pos o-login">
         <div className="o-login__card o-login__card--busy">
-          <img src="/ui/pos-awning.png" alt="" className="o-login__logo" width={48} height={44} />
+          <img src="/ui/gymkhana-mark.png" alt="" className="o-login__logo" width={48} height={48} />
           <div className="o-loading-bar"><span /></div>
           <p>Opening Gymkhana…</p>
         </div>
@@ -95,7 +95,7 @@ export function LoginPage() {
     <main className="odoo-pos o-login">
       <form className="o-login__card" onSubmit={(event) => void submitPin(event)}>
         <div className="o-login__brand">
-          <img src="/ui/pos-awning.png" alt="" className="o-login__logo" width={48} height={44} />
+          <img src="/ui/gymkhana-mark.png" alt="" className="o-login__logo" width={48} height={48} />
           <div>
             <p className="o-login__eyebrow">Gymkhana</p>
             <h1>Sign in</h1>

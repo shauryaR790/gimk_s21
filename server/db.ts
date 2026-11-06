@@ -559,15 +559,59 @@ CREATE TABLE IF NOT EXISTS trainer_sessions (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_trainer_sessions_shift ON trainer_sessions(shift_id);
+CREATE TABLE IF NOT EXISTS join_requests (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL,
+  ref_no INTEGER NOT NULL,
+  sport TEXT NOT NULL,
+  name TEXT NOT NULL,
+  mobile TEXT NOT NULL,
+  email TEXT NOT NULL DEFAULT '',
+  dob TEXT NOT NULL DEFAULT '',
+  govt_id_label TEXT NOT NULL DEFAULT '',
+  govt_id_url TEXT NOT NULL DEFAULT '',
+  wants_trainer INTEGER NOT NULL DEFAULT 0,
+  trainer_id TEXT NOT NULL DEFAULT '',
+  preferred_slot TEXT NOT NULL DEFAULT '',
+  plan_id TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  payment_status TEXT NOT NULL DEFAULT 'UNPAID',
+  payment_method TEXT NOT NULL DEFAULT '',
+  razorpay_order_id TEXT NOT NULL DEFAULT '',
+  razorpay_payment_id TEXT NOT NULL DEFAULT '',
+  order_id TEXT NOT NULL DEFAULT '',
+  customer_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'NEW',
+  handled_by TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_join_requests_created ON join_requests(created_at);
+CREATE TABLE IF NOT EXISTS seed_marks (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL
+);
 `);
   addColumn(database, 'trainers', 'email', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'trainers', 'govt_id_label', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'trainers', 'govt_id_url', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'trainers', 'notes', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'trainers', 'offers', "TEXT NOT NULL DEFAULT 'group,private'");
+  addColumn(database, 'trainers', 'free_slots', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'join_requests', 'pincode', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'join_requests', 'is_member', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn(database, 'join_requests', 'become_member', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn(database, 'join_requests', 'photo_url', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'join_requests', 'password_hash', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'customers', 'dob', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'bookings', 'created_by', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'check_ins', 'checked_in_by', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'maintenance_records', 'actor', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'maintenance_records', 'category', "TEXT NOT NULL DEFAULT 'Repair'");
+  addColumn(database, 'maintenance_records', 'priority', "TEXT NOT NULL DEFAULT 'NORMAL'");
+  addColumn(database, 'maintenance_records', 'assigned_to', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'maintenance_records', 'cost', 'INTEGER NOT NULL DEFAULT 0');
   addColumn(database, 'desk_shifts', 'phone', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'desk_shifts', 'email', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'desk_shifts', 'role_label', "TEXT NOT NULL DEFAULT ''");
@@ -630,8 +674,19 @@ export function run(sql: string, params: SqlValue[] = []) {
   return db.prepare(sql).run(...params);
 }
 
+let txDepth = 0;
+
 export function tx<T>(fn: () => T): T {
+  if (txDepth > 0) {
+    txDepth += 1;
+    try {
+      return fn();
+    } finally {
+      txDepth -= 1;
+    }
+  }
   db.exec('BEGIN IMMEDIATE');
+  txDepth = 1;
   try {
     const result = fn();
     db.exec('COMMIT');
@@ -643,5 +698,7 @@ export function tx<T>(fn: () => T): T {
       /* already closed */
     }
     throw error;
+  } finally {
+    txDepth = 0;
   }
 }

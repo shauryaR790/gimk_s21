@@ -1,0 +1,462 @@
+@font-face {
+  font-family: 'Pillar';
+  src: url('./assets/Pillar.ttf') format('truetype');
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Alumni Sans Collegiate One';
+  src: url('./assets/AlumniSansCollegiateOne.ttf') format('truetype');
+  font-display: block;
+}
+
+html.gkf-page,
+body.gkf-page,
+html.gkf-page #root,
+html:has(.gkf),
+body:has(.gkf) {
+  height: auto;
+  max-height: none;
+  background: #090000;
+  overflow-x: clip;
+  overflow-y: auto;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+html.gkf-page::-webkit-scrollbar,
+body.gkf-page::-webkit-scrollbar,
+html:has(.gkf)::-webkit-scrollbar,
+.gkf::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+}
+
+.gkf {
+  --paper: #f4f4f4;
+  --ink: #111;
+  --mute: rgba(244, 244, 244, 0.62);
+  --serif: Palatino, 'Palatino Linotype', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
+  min-height: 100dvh;
+  padding: 28px 22px 48px;
+  background: #090000 center / cover no-repeat;
+  color: var(--paper);
+  font-family: var(--serif);
+}
+
+.gkf-sheet {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 420px);
+  margin: 0 auto;
+}
+
+.gkf-head {
+  position: relative;
+  margin: 8px 0 28px;
+  padding-right: 52px;
+}
+
+.gkf-mark {
+  display: block;
+  width: max-content;
+  color: var(--paper);
+  font-family: 'Pillar', 'Anton', sans-serif;
+  font-size: 34px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  line-height: 0.82;
+  text-decoration: none;
+}
+
+.gkf-head h1 {
+  margin: 8px 0 0;
+  color: var(--paper);
+  font-family: 'Pillar', 'Anton', sans-serif;
+  font-size: clamp(114px, 32vw, 132px);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 0.82;
+}
+
+.gkf-orb {
+  position: absolute;
+  top: 58px;
+  right: -4px;
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  pointer-events: none;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.45));
+}
+
+.gkf-form,
+.gkf-done {
+  display: grid;
+  gap: 18px;
+}
+
+.gkf-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.gkf-field {
+  display: grid;
+  gap: 8px;
+}
+
+.gkf-field > span {
+  color: var(--paper);
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.1;
+}
+
+.gkf-field input,
+.gkf-drop {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  color: #000;
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.gkf-field input {
+  height: 42px;
+  padding: 0 22px;
+}
+
+.gkf-secret {
+  position: relative;
+  display: block;
+}
+
+.gkf-secret input {
+  padding-right: 46px;
+}
+
+.gkf-secret__eye {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: #111;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.gkf-secret__eye:focus-visible {
+  outline: 2px solid #111;
+  outline-offset: 0;
+}
+
+.gkf-field input::placeholder {
+  color: #999;
+  font-weight: 400;
+}
+
+.gkf-field input:focus,
+.gkf-drop:focus-within,
+.gkf .gk-dd__btn:focus-visible,
+.gkf-confirm:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+.gkf .gk-dd {
+  display: block;
+  width: 100%;
+}
+
+.gkf .gk-dd__btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 34px;
+  padding: 0 16px 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  color: #000;
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gkf .gk-dd__value.is-placeholder {
+  color: #9a9a9a;
+  font-weight: 400;
+}
+
+.gkf .gk-dd__btn svg {
+  flex: none;
+  color: #111;
+}
+
+.gkf .gk-dd.is-open .gk-dd__btn svg {
+  color: #8b1219;
+  transform: rotate(180deg);
+}
+
+.gkf .o-be-dropdown.gk-dd__menu {
+  background: #000000 !important;
+  color: #f0f0f0;
+  border-color: #2e2e2e;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+}
+
+.gkf .o-be-dropdown__item {
+  color: #f0f0f0 !important;
+  -webkit-text-fill-color: #f0f0f0 !important;
+  font: 400 13px/1.2 Inter, system-ui, sans-serif !important;
+}
+
+.gkf .o-be-dropdown__item:hover,
+.gkf .o-be-dropdown__item.is-on {
+  background: #1a1a1a;
+}
+
+.gkf-drop {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 42px;
+  padding: 0 22px;
+  cursor: pointer;
+}
+
+.gkf-drop.is-over,
+.gkf-drop.is-held {
+  box-shadow: inset 0 0 0 2px #111;
+}
+
+.gkf-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.gkf-drop em {
+  overflow: hidden;
+  max-width: 100%;
+  font-family: var(--serif);
+  font-size: 16px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #9a9a9a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gkf-drop.is-held em {
+  color: #000;
+}
+
+.gkf-error {
+  margin: 0;
+  color: #fff;
+  font-family: var(--serif);
+  font-size: 15px;
+}
+
+.gkf-foot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  margin-top: 8px;
+  min-height: 72px;
+}
+
+.gkf-iron {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 58px;
+  height: 58px;
+  object-fit: contain;
+  pointer-events: none;
+  transform: translateY(-50%);
+  filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.5));
+}
+
+.gkf-confirm {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--paper);
+  font-family: 'Pillar', 'Anton', sans-serif;
+  font-size: clamp(52px, 14vw, 72px);
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  line-height: 0.9;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.gkf-confirm:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.gkf.is-done {
+  display: block;
+  padding: 0;
+}
+
+.gkf-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100dvh;
+  padding: 52px 28px 36px;
+  text-align: center;
+}
+
+.gkf-done__head {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+}
+
+.gkf-done__mark {
+  color: #c4121a;
+  font-family: 'Pillar', 'Anton', sans-serif;
+  font-size: clamp(64px, 18vw, 108px);
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  line-height: 0.82;
+  text-decoration: none;
+}
+
+.gkf-done__sector {
+  margin: 0;
+  color: #c4121a;
+  font-family: 'Pillar', 'Anton', sans-serif;
+  font-size: clamp(18px, 5vw, 28px);
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  line-height: 1;
+}
+
+.gkf-done__star {
+  width: min(78vw, 460px);
+  height: auto;
+  margin: auto;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.45));
+}
+
+.gkf-done__copy {
+  margin: 0;
+  width: min(94vw, 1100px);
+  color: #f6f6f6;
+  font-family: 'Alumni Sans Collegiate One', 'Anton', sans-serif;
+  font-size: clamp(26px, 6.2vw, 40px);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 0.98;
+  text-transform: uppercase;
+  text-wrap: balance;
+  -webkit-font-smoothing: antialiased;
+}
+
+.gkf.is-login {
+  display: flex;
+  flex-direction: column;
+}
+
+.gkf.is-login .gkf-sheet {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.gkf.is-login .gkf-head {
+  margin: 8px 0 32px;
+}
+
+.gkf.is-login .gkf-head h1 {
+  font-size: clamp(92px, 26vw, 118px);
+}
+
+.gkf.is-login .gkf-orb {
+  top: 42px;
+  width: 44px;
+  height: 44px;
+}
+
+.gkf.is-login .gkf-form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gkf.is-login .gkf-field {
+  gap: 10px;
+}
+
+.gkf.is-login .gkf-field > span {
+  color: rgba(244, 244, 244, 0.78);
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.gkf.is-login .gkf-field input,
+.gkf.is-login .gkf-drop {
+  height: 46px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.gkf.is-login .gkf-foot {
+  margin-top: auto;
+  min-height: 88px;
+}
+
+.gkf.is-login .gkf-drop em {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+@media (min-width: 720px) {
+  .gkf:not(.is-done) {
+    display: grid;
+    place-items: center;
+    padding: 40px 24px;
+  }
+
+  .gkf.is-login:not(.is-done) {
+    display: flex;
+  }
+}

@@ -10,6 +10,7 @@ import { api } from '../../../lib/api';
 import { useTitle } from '../../../lib/useTitle';
 import { usePos } from '../PosContext';
 import { OpeningCashModal } from './OpeningCashModal';
+import { ActivityBoard, useChromeBoard } from './chrome';
 
 type Card = { config: PosConfig; session: PosSession | null; stats: PosSessionStats };
 type Dash = {
@@ -194,6 +195,34 @@ export function DashboardPage() {
     month: 'short',
     day: '2-digit',
   });
+
+  const board = [{
+    id: card.config.id,
+    title: card.config.name,
+    subtitle: open ? 'Register open' : 'Register closed',
+    meta: formatOdooINR(card.stats.soldTotal),
+    href: '/pos/app/register',
+    when: card.session?.openedAt,
+  }];
+  const { view, pageItems } = useChromeBoard(board);
+
+  if (view === 'activity') {
+    return <ActivityBoard items={pageItems} empty="No register yet" />;
+  }
+  if (view === 'list') {
+    return (
+      <table className="o-be-table gk-table">
+        <thead><tr><th>Register</th><th>Status</th><th>Today</th></tr></thead>
+        <tbody>
+          <tr className="is-link" onClick={() => goFoH(card.config.id)}>
+            <td><strong>{card.config.name}</strong></td>
+            <td>{open ? 'Open' : 'Closed'}</td>
+            <td>{formatOdooINR(card.stats.soldTotal)}</td>
+          </tr>
+        </tbody>
+      </table>
+    );
+  }
 
   return (
     <>

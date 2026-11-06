@@ -491,5 +491,113 @@ assert.throws(() => gym.createBooking({
   startAt: slot,
   payNow: false,
 }, 'test'), /already booked/);
+const statusBooking = gym.createBooking({
+  facilityId: 'fac_tennis',
+  memberName: 'Status Edit',
+  startAt: '2026-12-02T04:30:00.000Z',
+  payNow: false,
+}, 'test');
+assert.equal(gym.updateBooking(statusBooking.id, { status: 'CHECKED_IN' }, 'test').status, 'CHECKED_IN');
+assert.equal(gym.updateBooking(statusBooking.id, { status: 'COMPLETED' }, 'test').status, 'COMPLETED');
+assert.equal(gym.updateBooking(statusBooking.id, { status: 'CONFIRMED' }, 'test').status, 'CONFIRMED');
+
+const { normalizeSlots, slotsBetween, summarizeSlots } = await import('../shared/slots');
+assert.equal(summarizeSlots(slotsBetween(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], 6, 11)), 'Mon–Sat 06:00–11:00');
+assert.equal(summarizeSlots(['Wed 07:00', 'Mon 07:00', 'Mon 08:00', 'Mon 18:00']), 'Mon 07:00–09:00, 18:00–19:00 · Wed 07:00–08:00');
+assert.deepEqual(normalizeSlots(['Sun 06:00', 'Mon 25:00', 'Mon 06:00', 'Mon 06:00']), ['Mon 06:00', 'Sun 06:00']);
+
+const { env: testEnv } = await import('./env');
+const { createHmac } = await import('node:crypto');
+const { run: runSql } = await import('./db');
+const joinBase = { email: 'join@example.com', dob: '1995-04-12', govtIdType: 'Aadhaar', govtIdNumber: '1234 5678 9012' };
+const joinOptions = gym.joinOptions();
+assert.ok(joinOptions.sports.some((row) => row.sport === 'Badminton'));
+assert.ok(joinOptions.trainers.find((row) => row.id === 'trainer_head')?.freeSlots.includes('Mon 07:00'));
+assert.throws(() => gym.createJoinRequest({ ...joinBase, sport: 'Badminton', name: 'No Plan', mobile: '9876543209' }), /membership plan/);
+assert.throws(() => gym.createJoinRequest({ ...joinBase, dob: '2099-01-01', sport: 'Badminton', name: 'Future', mobile: '9876543209', planId: 'plan_monthly' }), /date of birth/);
+
+const deskJoin = gym.createJoinRequest({ ...joinBase, sport: 'badminton', name: 'Tara Joshi', mobile: '98765 43210', wantsTrainer: false, planId: 'plan_monthly' });
+assert.equal(deskJoin.status, 'NEW');
+assert.equal(deskJoin.amount, 2625);
+const deskFull = gym.getJoinRequest(deskJoin.id);
+assert.equal(deskFull.route, 'STAFF');
+assert.equal(deskFull.sport, 'Badminton');
+assert.equal(deskFull.govtIdLabel, 'Aadhaar · ending 9012');
+assert.equal(gym.createJoinRequest({ ...joinBase, sport: 'Badminton', name: 'Tara Joshi', mobile: '9876543210', planId: 'plan_monthly' }).id, deskJoin.id);
+assert.throws(() => gym.approveJoinRequest(deskJoin.id, undefined, 'desk'), /cash, UPI, or card/);
+assert.equal(gym.markJoinContacted(deskJoin.id, 'desk').status, 'CONTACTED');
+const deskApproved = gym.approveJoinRequest(deskJoin.id, 'CASH', 'desk');
+assert.equal(deskApproved.status, 'APPROVED');
+assert.equal(deskApproved.paymentStatus, 'PAID');
+assert.equal(gym.memberProfile(deskApproved.customerId).member.membershipStatus, 'ACTIVE');
+
+const trainerJoin = gym.createJoinRequest({ ...joinBase, sport: 'Badminton', name: 'Ira Sen', mobile: '9876543211', wantsTrainer: true, trainerId: 'trainer_head', preferredSlot: 'Mon 07:00', planId: 'plan_quarterly' });
+assert.equal(gym.getJoinRequest(trainerJoin.id).route, 'TRAINER');
+assert.equal(trainerJoin.preferredSlotLabel, 'Mon 07:00–08:00');
+testEnv.razorpayKeyId = 'rzp_test_key';
+testEnv.razorpayKeySecret = 'rzp_test_secret';
+const signJoin = (orderId: string, paymentId: string) => createHmac('sha256', 'rzp_test_secret').update(`${orderId}|${paymentId}`).digest('hex');
+runSql(`UPDATE join_requests SET razorpay_order_id = 'order_join_1' WHERE id = ?`, [trainerJoin.id]);
+assert.throws(() => gym.confirmJoinPayment(trainerJoin.id, 'order_join_1', 'pay_join_1', 'forged'), /verification failed/);
+assert.throws(() => gym.confirmJoinPayment(trainerJoin.id, 'order_other', 'pay_join_1', signJoin('order_other', 'pay_join_1')), /does not match/);
+const paidJoin = gym.confirmJoinPayment(trainerJoin.id, 'order_join_1', 'pay_join_1', signJoin('order_join_1', 'pay_join_1'));
+assert.equal(paidJoin.paymentStatus, 'PAID');
+assert.equal(paidJoin.status, 'NEW');
+assert.equal(gym.confirmJoinPayment(trainerJoin.id, 'order_join_1', 'pay_join_1', signJoin('order_join_1', 'pay_join_1')).paymentStatus, 'PAID');
+const trainerApproved = gym.approveJoinRequest(trainerJoin.id, undefined, 'Neha Kapoor');
+assert.equal(gym.memberProfile(trainerApproved.customerId).member.coachId, 'trainer_head');
+assert.ok(!gym.joinOptions().trainers.find((row) => row.id === 'trainer_head')?.freeSlots.includes('Mon 07:00'));
+assert.throws(() => gym.createJoinRequest({ ...joinBase, sport: 'Badminton', name: 'Late Comer', mobile: '9876543212', wantsTrainer: true, trainerId: 'trainer_head', preferredSlot: 'Mon 07:00', planId: 'plan_monthly' }), /no longer free/);
+
+const refundJoin = gym.createJoinRequest({ ...joinBase, sport: 'Tennis', name: 'Dev Rao', mobile: '9876543213', planId: 'plan_monthly' });
+runSql(`UPDATE join_requests SET razorpay_order_id = 'order_join_2' WHERE id = ?`, [refundJoin.id]);
+gym.confirmJoinPayment(refundJoin.id, 'order_join_2', 'pay_join_2', signJoin('order_join_2', 'pay_join_2'));
+const declined = gym.declineJoinRequest(refundJoin.id, 'Plan not suitable', 'desk', 'Plan not suitable\nWants evening tennis only');
+assert.equal(declined.request.status, 'DECLINED');
+assert.equal(declined.request.notes, 'Plan not suitable\nWants evening tennis only');
+assert.equal(declined.request.paymentStatus, 'REFUNDED');
+assert.match(declined.note, /Razorpay/);
+testEnv.razorpayKeyId = '';
+testEnv.razorpayKeySecret = '';
+
+const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const signup = gym.createJoinRequest({
+  signup: true,
+  firstName: 'Nikita',
+  lastName: 'Volkov',
+  email: 'nikita@gymkhana.local',
+  pincode: '400001',
+  sport: 'Skating',
+  govtIdUrl: pixel,
+  wantsTrainer: true,
+  becomeMember: true,
+});
+assert.equal(signup.status, 'NEW');
+assert.equal(signup.wantsTrainer, true);
+const signupFull = gym.getJoinRequest(signup.id);
+assert.equal(signupFull.route, 'TRAINER');
+assert.equal(signupFull.sport, 'Skating');
+assert.equal(signupFull.name, 'Nikita Volkov');
+assert.equal(signupFull.pincode, '400001');
+assert.equal(signupFull.becomeMember, true);
+assert.equal(signupFull.trainerName, '');
+assert.throws(() => gym.approveJoinRequest(signup.id, 'CASH', 'desk'), /trainer/i);
+gym.updateJoinRequest(signup.id, { trainerId: 'trainer_imran', planId: 'plan_monthly', mobile: '9876543299' }, 'desk');
+const assigned = gym.getJoinRequest(signup.id);
+assert.equal(assigned.trainerId, 'trainer_imran');
+assert.equal(assigned.planId, 'plan_monthly');
+
+const deskSignup = gym.createJoinRequest({
+  signup: true,
+  firstName: 'Oksana',
+  lastName: 'Petrov',
+  email: 'oksana@gymkhana.local',
+  pincode: '110001',
+  sport: 'Gym',
+  govtIdUrl: pixel,
+  wantsTrainer: false,
+  isMember: true,
+});
+assert.equal(gym.getJoinRequest(deskSignup.id).route, 'STAFF');
 
 console.log('server tests passed');

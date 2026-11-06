@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import type { BackendChromeContext } from './OdooBackendLayout';
 import { taxLabel, type MenuItem, type ProductSheet } from '../../../../shared/domain';
 import { INGREDIENT_IDS, type IngredientId } from '../../../../shared/menuDisplay';
 import { api } from '../../../lib/api';
@@ -99,6 +100,7 @@ async function uploadMenuPhoto(file: File) {
 export function ProductFormPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { setListPath, setPager, setPagerLabel } = useOutletContext<BackendChromeContext>();
   const pos = usePos();
   const isNew = id === 'new';
   const [held, setHeld] = useState<MenuItem | null>(null);
@@ -110,6 +112,8 @@ export function ProductFormPage() {
   const ordered = pos.items.filter((entry) => entry.isAvailable && sportsIds.has(entry.categoryId)).slice().sort((a, b) => a.name.localeCompare(b.name));
   const index = item ? ordered.findIndex((entry) => entry.id === item.id) : -1;
 
+  const prevId = index > 0 ? ordered[index - 1]?.id : undefined;
+  const nextId = index >= 0 && index < ordered.length - 1 ? ordered[index + 1]?.id : undefined;
   const [tab, setTab] = useState<Tab>('general');
   const [name, setName] = useState('');
   const [price, setPrice] = useState('1.00');
@@ -122,6 +126,26 @@ export function ProductFormPage() {
   const [saving, setSaving] = useState(false);
 
   const tax = taxLabel(pos.cafe?.taxBps ?? 500);
+
+  useEffect(() => {
+    setListPath('/pos/backend/products');
+    if (!isNew && index >= 0) {
+      setPagerLabel(`${index + 1} / ${ordered.length}`);
+      setPager({
+        canPrev: Boolean(prevId),
+        canNext: Boolean(nextId),
+        onPrev: () => prevId && navigate(`/pos/backend/products/${prevId}`),
+        onNext: () => nextId && navigate(`/pos/backend/products/${nextId}`),
+      });
+    } else {
+      setPagerLabel('1-1 / 1');
+      setPager(null);
+    }
+    return () => {
+      setListPath(null);
+      setPager(null);
+    };
+  }, [index, isNew, navigate, nextId, ordered.length, prevId, setListPath, setPager, setPagerLabel]);
 
   useEffect(() => {
     if (isNew) {

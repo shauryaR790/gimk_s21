@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import type { CustomerSummary, MenuCategory, MenuItem, Order } from '../../../../shared/domain';
 import { api } from '../../../lib/api';
@@ -20,6 +20,8 @@ const NAV_MENUS = [
     items: [
       { to: '/pos/backend/visitors', label: 'Visitors' },
       { to: '/pos/backend/memberships', label: 'Memberships' },
+      { to: '/pos/backend/membership-requests', label: 'Membership requests' },
+      { to: '/pos/backend/trainer-requests', label: 'Trainer requests' },
       { to: '/pos/backend/employees', label: 'Employees' },
     ],
   },
@@ -38,21 +40,36 @@ const NAV_MENUS = [
   },
 ] as const;
 
+export type ChromeView = 'list' | 'kanban' | 'activity';
+
+export type ChromePager = {
+  canPrev: boolean;
+  canNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+};
+
 export type BackendChromeContext = {
   search: string;
   setSearch: (value: string) => void;
   pagerLabel: string;
   setPagerLabel: (value: string) => void;
+  view: ChromeView;
+  setView: (value: ChromeView) => void;
+  pager: ChromePager | null;
+  setPager: (value: ChromePager | null) => void;
+  listPath: string | null;
+  setListPath: (value: string | null) => void;
 };
 
-function AwningIcon() {
+function BrandMark() {
   return (
     <img
-      src="/ui/pos-awning.png"
+      src="/ui/gymkhana-mark.png"
       alt=""
-      width={30}
-      height={28}
-      className="o-be-awning"
+      width={18}
+      height={18}
+      className="o-be-mark"
       draggable={false}
     />
   );
@@ -138,6 +155,18 @@ function ChevronIcon({ dir }: { dir: 'left' | 'right' }) {
   );
 }
 
+function defaultView(pathname: string): ChromeView {
+  try {
+    const stored = sessionStorage.getItem(`gk-view:${pathname}`);
+    if (stored === 'list' || stored === 'kanban' || stored === 'activity') return stored;
+  } catch {
+    /* ignore */
+  }
+  if (/\/backend\/products\/[^/]+$/.test(pathname)) return 'list';
+  if (pathname.includes('/backend/products') || pathname.includes('/backend/overview')) return 'kanban';
+  return 'list';
+}
+
 function controlTitle(pathname: string) {
   if (pathname === '/pos' || pathname.endsWith('/pos') || pathname.includes('/backend/reporting') || pathname.endsWith('/reports')) return 'Dashboard';
   if (pathname.includes('/backend/overview')) return 'Overview';
@@ -146,11 +175,13 @@ function controlTitle(pathname: string) {
   if (pathname.includes('/backend/sessions')) return 'Sessions';
   if (pathname.includes('/backend/payments')) return 'Payments';
   if (pathname.includes('/backend/preparation')) return 'Activity Schedule';
+  if (pathname.includes('/backend/membership-requests')) return 'Membership requests';
+  if (pathname.includes('/backend/memberships')) return 'Memberships';
   if (pathname.includes('/backend/visitors') || pathname.includes('/backend/members')) return 'Visitors';
+  if (pathname.includes('/backend/trainer-requests')) return 'Trainer requests';
   if (pathname.includes('/backend/plans')) return 'Memberships';
   if (pathname.includes('/backend/trainers')) return 'Trainers';
   if (pathname.includes('/backend/shift')) return 'Shift';
-  if (pathname.includes('/backend/memberships')) return 'Memberships';
   if (pathname.includes('/backend/employees')) return 'Employees';
   if (pathname.includes('/backend/facilities')) return 'Facilities';
   if (pathname.includes('/backend/maintenance')) return 'Maintenance';
@@ -161,7 +192,8 @@ function controlTitle(pathname: string) {
   if (pathname.includes('/backend/customers') || pathname.endsWith('/customers')) return 'Members';
   if (pathname.includes('/backend/products')) return 'Services & Products';
   if (pathname.includes('/backend/inventory') || pathname.endsWith('/inventory')) return 'Inventory';
-  if (pathname.includes('/backend/config')) return 'Settings';
+  if (pathname.includes('/backend/config') || pathname.endsWith('/settings')) return 'Settings';
+  if (pathname.endsWith('/menu')) return 'Menu';
   return 'Gymkhana';
 }
 
@@ -170,17 +202,29 @@ export function OdooBackendLayout() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const initial = (user?.name ?? 'S').trim().charAt(0).toUpperCase() || 'S';
-  const isDashboard = pathname.includes('/backend/overview');
   const [menuKey, setMenuKey] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [titleOpen, setTitleOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [pagerLabel, setPagerLabel] = useState('0-0 / 0');
+  const [view, setViewState] = useState<ChromeView>(() => defaultView(pathname));
+  const [pager, setPager] = useState<ChromePager | null>(null);
+  const [listPath, setListPath] = useState<string | null>(null);
   const ordersRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLDivElement>(null);
   const title = controlTitle(pathname);
-  const isListView = pathname.includes('/backend/orders') || pathname.includes('/backend/sessions');
+
+  function setView(next: ChromeView) {
+    setViewState(next);
+    const key = listPath || pathname;
+    try {
+      sessionStorage.setItem(`gk-view:${key}`, next);
+    } catch {
+      /* ignore */
+    }
+    if (listPath && pathname !== listPath) navigate(listPath);
+  }
 
   useEffect(() => {
     if (!menuKey && !menuOpen && !titleOpen) return;
@@ -206,19 +250,23 @@ export function OdooBackendLayout() {
     };
   }, [menuKey, menuOpen, titleOpen]);
 
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
   useEffect(() => {
     setMenuKey(null);
     setMenuOpen(false);
     setTitleOpen(false);
     setSearch('');
-    setPagerLabel('0-0 / 0');
+    setViewState(defaultView(pathname));
   }, [pathname]);
 
   return (
     <div className="odoo-pos odoo-pos--backend">
       <header className="o-be-nav o-be-nav--light">
         <div className="o-be-nav__brand">
-          <AwningIcon />
+          <BrandMark />
           <span>Gymkhana</span>
         </div>
         <nav className="o-be-nav__links">
@@ -394,31 +442,36 @@ export function OdooBackendLayout() {
         <div className="o-be-control__right">
           <span className="o-be-pager">{pagerLabel}</span>
           <div className="o-be-page-btns">
-            <button type="button" className="o-be-icon o-be-icon--bare" aria-label="Previous" disabled>
+            <button type="button" className="o-be-icon o-be-icon--bare" aria-label="Previous" disabled={!pager?.canPrev} onClick={() => pager?.onPrev()}>
               <ChevronIcon dir="left" />
             </button>
-            <button type="button" className="o-be-icon o-be-icon--bare" aria-label="Next" disabled>
+            <button type="button" className="o-be-icon o-be-icon--bare" aria-label="Next" disabled={!pager?.canNext} onClick={() => pager?.onNext()}>
               <ChevronIcon dir="right" />
             </button>
           </div>
           <div className="o-be-view-switch">
             <button
               type="button"
-              className={`o-be-icon o-be-icon--bare${isListView ? ' is-on' : ''}`}
+              className={`o-be-icon o-be-icon--bare${view === 'list' ? ' is-on' : ''}`}
               aria-label="List"
-              onClick={() => navigate('/pos/backend/orders')}
+              onClick={() => setView('list')}
             >
               <ListIcon />
             </button>
             <button
               type="button"
-              className={`o-be-icon o-be-icon--bare${!isListView && isDashboard ? ' is-on' : ''}`}
+              className={`o-be-icon o-be-icon--bare${view === 'kanban' ? ' is-on' : ''}`}
               aria-label="Kanban"
-              onClick={() => navigate('/pos/backend/overview')}
+              onClick={() => setView('kanban')}
             >
               <KanbanIcon />
             </button>
-            <button type="button" className="o-be-icon o-be-icon--bare" aria-label="Activity" disabled>
+            <button
+              type="button"
+              className={`o-be-icon o-be-icon--bare${view === 'activity' ? ' is-on' : ''}`}
+              aria-label="Activity"
+              onClick={() => setView('activity')}
+            >
               <ActivityIcon />
             </button>
           </div>
@@ -426,7 +479,7 @@ export function OdooBackendLayout() {
       </div>
 
       <div className="o-be-body">
-        <Outlet context={{ search, setSearch, pagerLabel, setPagerLabel } satisfies BackendChromeContext} />
+        <Outlet context={{ search, setSearch, pagerLabel, setPagerLabel, view, setView, pager, setPager, listPath, setListPath } satisfies BackendChromeContext} />
       </div>
     </div>
   );

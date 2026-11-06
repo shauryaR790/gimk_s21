@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ChromeRecords } from './chrome';
 import { formatOdooINR, type InventoryItem } from '../../../../shared/domain';
 import { api } from '../../../lib/api';
 import { useTitle } from '../../../lib/useTitle';
@@ -57,24 +58,41 @@ export function BackendInventoryPage() {
         <article className="o-track__stat o-track__stat--plain"><span>Stock value</span><strong>{formatOdooINR(stockValue)}</strong><em>At cost</em></article>
       </section>
 
-      <table className="o-be-table gk-table">
-        <thead>
-          <tr><th>Equipment</th><th>SKU</th><th>On hand</th><th>Reorder at</th><th>Cost per piece</th><th>Supplier</th></tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.id} className={`is-link${item.lowStock ? ' is-low' : ''}`} onClick={() => navigate(`/pos/backend/inventory/${item.id}`)}>
-              <td><strong>{item.name}</strong></td>
-              <td>{item.sku || '—'}</td>
-              <td>{qtyLabel(item.qty, item.unit)}</td>
-              <td>{qtyLabel(item.reorderLevel, item.unit)}</td>
-              <td>{formatOdooINR(item.costPerUnit)}</td>
-              <td>{item.supplier || '—'}</td>
-            </tr>
-          ))}
-          {!items.length ? <tr><td colSpan={6} className="o-be-table__empty">No equipment yet — add an item from this page</td></tr> : null}
-        </tbody>
-      </table>
+      <ChromeRecords
+        items={items.map((item) => ({
+          id: item.id,
+          title: item.name,
+          subtitle: item.sku || qtyLabel(item.qty, item.unit),
+          meta: item.lowStock ? 'Low stock' : item.supplier || 'In store',
+          href: `/pos/backend/inventory/${item.id}`,
+        }))}
+        empty="No equipment yet — add an item from this page"
+      >
+        {(page) => (
+          <table className="o-be-table gk-table">
+            <thead>
+              <tr><th>Equipment</th><th>SKU</th><th>On hand</th><th>Reorder at</th><th>Cost per piece</th><th>Supplier</th></tr>
+            </thead>
+            <tbody>
+              {page.map((card) => {
+                const item = items.find((row) => row.id === card.id);
+                if (!item) return null;
+                return (
+                  <tr key={item.id} className={`is-link${item.lowStock ? ' is-low' : ''}`} onClick={() => navigate(`/pos/backend/inventory/${item.id}`)}>
+                    <td><strong>{item.name}</strong></td>
+                    <td>{item.sku || '—'}</td>
+                    <td>{qtyLabel(item.qty, item.unit)}</td>
+                    <td>{qtyLabel(item.reorderLevel, item.unit)}</td>
+                    <td>{formatOdooINR(item.costPerUnit)}</td>
+                    <td>{item.supplier || '—'}</td>
+                  </tr>
+                );
+              })}
+              {!items.length ? <tr><td colSpan={6} className="o-be-table__empty">No equipment yet — add an item from this page</td></tr> : null}
+            </tbody>
+          </table>
+        )}
+      </ChromeRecords>
     </section>
   );
 }

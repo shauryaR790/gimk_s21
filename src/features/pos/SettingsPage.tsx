@@ -11,6 +11,7 @@ import { Modal } from '../../components/Modal';
 import { pushToast } from '../../components/Toast';
 import { printAllTableQr } from '../../lib/printQr';
 import { usePos } from './PosContext';
+import { ChromeRecords } from './odoo/chrome';
 
 type BeforeInstall = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
 
@@ -53,7 +54,22 @@ export function SettingsPage() {
         <h1>Settings</h1>
       </header>
 
+      <ChromeRecords
+        items={[
+          { id: 'cafe', title: name || 'Cafe', subtitle: 'Name and tax', meta: 'Cafe' },
+          { id: 'staff', title: pos.user?.name ?? 'Staff', subtitle: pos.user?.role ?? 'Role', meta: 'Staff' },
+          { id: 'loyalty', title: 'Loyalty', subtitle: 'Visits and spend follow the guest mobile', meta: 'Guests' },
+          { id: 'device', title: 'This device', subtitle: pos.conn === 'ONLINE' ? 'Online' : pos.conn === 'OFFLINE' ? 'Offline' : pos.conn, meta: 'Connection' },
+          { id: 'qr', title: 'Table QR codes', subtitle: `${tables.length} tables`, meta: 'Print' },
+          { id: 'sync', title: 'Sync queue', subtitle: pos.queue.length ? `${pos.queue.length} waiting` : 'Nothing waiting', meta: 'Sync' },
+        ]}
+        empty="No settings yet"
+      >
+        {(page) => {
+          const show = new Set(page.map((item) => item.id));
+          return (
       <div className="settings-grid">
+      {show.has('cafe') ? (
       <section className="panel">
         <h2>Cafe</h2>
         <form
@@ -71,12 +87,16 @@ export function SettingsPage() {
           <Button type="submit" className="settings-save">Save</Button>
         </form>
       </section>
+      ) : null}
 
+      {show.has('staff') ? (
       <section className="panel">
         <h2>Staff</h2>
         <p className="fine">{pos.user?.name ?? 'Staff'} · {pos.user?.email ?? ''} · {pos.user?.role ?? ''}</p>
       </section>
+      ) : null}
 
+      {show.has('loyalty') ? (
       <section className="panel">
         <h2>Loyalty</h2>
         <p className="fine">
@@ -84,7 +104,9 @@ export function SettingsPage() {
           The register Loyalty button attaches that guest to the current ticket.
         </p>
       </section>
+      ) : null}
 
+      {show.has('device') ? (
       <section className="panel">
         <h2>This device</h2>
         <p className="fine">
@@ -101,7 +123,9 @@ export function SettingsPage() {
           <Button variant="danger" onClick={() => setWipe(true)}>Clear local data</Button>
         </div>
       </section>
+      ) : null}
 
+      {show.has('qr') ? (
       <section className="panel settings-panel-wide">
         <h2>Table QR codes</h2>
         <p className="fine">Print one per table. Scanning it opens the guest menu for that table.</p>
@@ -116,7 +140,9 @@ export function SettingsPage() {
           Print all QR codes
         </Button>
       </section>
+      ) : null}
 
+      {show.has('sync') ? (
       <section className="panel settings-panel-wide">
         <h2>Sync queue</h2>
         {pos.queue.length === 0 ? <p className="fine">Nothing waiting.</p> : null}
@@ -135,7 +161,11 @@ export function SettingsPage() {
         ))}
         {pos.syncError ? <p className="field-error">{pos.syncError}</p> : null}
       </section>
+      ) : null}
       </div>
+          );
+        }}
+      </ChromeRecords>
 
       <Drawer open={Boolean(qrTable)} title={qrTable ? `${qrTable.name} QR code` : 'QR code'} onClose={() => setQrTable(null)}>
         {qrTable ? <TableQr table={qrTable} /> : null}

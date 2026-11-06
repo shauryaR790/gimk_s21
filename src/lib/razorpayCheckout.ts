@@ -38,6 +38,44 @@ function loadRazorpayScript() {
   return scriptPromise;
 }
 
+export type RazorpayResult = { razorpayOrderId: string; razorpayPaymentId: string; razorpaySignature: string };
+
+export async function openRazorpayCheckout(input: {
+  key: string;
+  amount: number;
+  currency: string;
+  orderId: string;
+  name: string;
+  description: string;
+  prefill: { name?: string; email?: string; contact?: string };
+}) {
+  await loadRazorpayScript();
+  if (!window.Razorpay) throw new Error('Razorpay is unavailable.');
+  return new Promise<RazorpayResult>((resolve, reject) => {
+    const rzp = new window.Razorpay!({
+      key: input.key,
+      amount: input.amount,
+      currency: input.currency,
+      name: input.name,
+      description: input.description,
+      order_id: input.orderId,
+      prefill: input.prefill,
+      theme: { color: '#111111' },
+      handler: (response: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
+        resolve({
+          razorpayOrderId: response.razorpay_order_id,
+          razorpayPaymentId: response.razorpay_payment_id,
+          razorpaySignature: response.razorpay_signature,
+        });
+      },
+      modal: {
+        ondismiss: () => reject(new Error('Payment cancelled.')),
+      },
+    });
+    rzp.open();
+  });
+}
+
 export async function collectRazorpayPayment(input: {
   orderId: string;
   amountInr?: number;
