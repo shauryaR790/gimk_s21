@@ -2,12 +2,18 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, ApiError } from '../../lib/api';
 import { useTitle } from '../../lib/useTitle';
-import { clearStaffSession, hasStaffSession, markStaffSession } from './staffSession';
+import {
+  clearStaffSession,
+  hasStaffSession,
+  markStaffSession,
+  setDeskMode,
+} from './staffSession';
 
 /** Demo counter PIN — signs in as the seeded staff user (see server env defaults). */
 const DEMO_PIN = '2580';
 const DEMO_EMAIL = 'admin@habs.cafe';
 const DEMO_PASSWORD = 'habsos-admin';
+const HOME = '/pos';
 
 export function LoginPage() {
   useTitle('Gymkhana');
@@ -27,7 +33,8 @@ export function LoginPage() {
         await api<{ user: { id: string } }>('/api/auth/me');
         if (cancel) return;
         markStaffSession();
-        navigate('/pos', { replace: true });
+        setDeskMode('employee');
+        navigate(HOME, { replace: true });
       } catch {
         if (cancel) return;
         if (hasStaffSession()) clearStaffSession();
@@ -39,10 +46,15 @@ export function LoginPage() {
     };
   }, [navigate]);
 
+  function openDesk() {
+    markStaffSession();
+    setDeskMode('employee');
+    navigate(HOME, { replace: true });
+  }
+
   async function loginWith(emailValue: string, passwordValue: string) {
     await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: emailValue, password: passwordValue }) });
-    markStaffSession();
-    navigate('/pos', { replace: true });
+    openDesk();
   }
 
   async function submitPin(event: FormEvent) {
@@ -101,7 +113,7 @@ export function LoginPage() {
             <h1>Sign in</h1>
           </div>
         </div>
-        <p className="o-login__hint">Demo PIN for staff sign-in</p>
+        <p className="o-login__hint">Demo PIN</p>
         <label className="o-login__field">
           <span>PIN</span>
           <input

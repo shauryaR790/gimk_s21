@@ -44,6 +44,12 @@ export const env = {
   smsFrom: process.env.SMS_FROM || '',
   razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',
   razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
+  whatsappAccessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
+  whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+  whatsappWabaId: process.env.WHATSAPP_WABA_ID || '',
+  whatsappAppSecret: process.env.WHATSAPP_APP_SECRET || '',
+  whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN || '',
+  whatsappGraphVersion: process.env.WHATSAPP_GRAPH_VERSION || 'v21.0',
 };
 
 export function isProduction() {

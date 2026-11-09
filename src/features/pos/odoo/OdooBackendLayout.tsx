@@ -3,42 +3,9 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import type { CustomerSummary, MenuCategory, MenuItem, Order } from '../../../../shared/domain';
 import { api } from '../../../lib/api';
 import { downloadExcel, type ExcelSheet } from '../../../lib/excel';
+import { deskLinkActive, EMPLOYEE_LINKS, isPeopleListPath } from '../staffSession';
+import { ActiveUserSubnav, CommunicationsSubnav } from '../gym/userNav';
 import { usePos } from '../PosContext';
-
-const NAV_MENUS = [
-  {
-    label: 'Operations',
-    items: [
-      { to: '/pos/backend/bookings', label: 'Bookings' },
-      { to: '/pos/backend/shift', label: 'Shift' },
-      { to: '/pos/backend/classes', label: 'Classes & Coaching' },
-      { to: '/pos/backend/sessions', label: 'Sessions' },
-    ],
-  },
-  {
-    label: 'People',
-    items: [
-      { to: '/pos/backend/visitors', label: 'Visitors' },
-      { to: '/pos/backend/memberships', label: 'Memberships' },
-      { to: '/pos/backend/membership-requests', label: 'Membership requests' },
-      { to: '/pos/backend/trainer-requests', label: 'Trainer requests' },
-      { to: '/pos/backend/employees', label: 'Employees' },
-    ],
-  },
-  {
-    label: 'Place',
-    items: [
-      { to: '/pos/backend/facilities', label: 'Facilities' },
-      { to: '/pos/backend/maintenance', label: 'Maintenance' },
-    ],
-  },
-  {
-    label: 'Stock',
-    items: [
-      { to: '/pos/backend/inventory', label: 'Inventory' },
-    ],
-  },
-] as const;
 
 export type ChromeView = 'list' | 'kanban' | 'activity';
 
@@ -80,15 +47,6 @@ function SearchIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
       <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.7" />
       <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function BagIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M6 8h12l-1 12H7L6 8z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-      <path d="M9 8V7a3 3 0 016 0v1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }
@@ -155,6 +113,65 @@ function ChevronIcon({ dir }: { dir: 'left' | 'right' }) {
   );
 }
 
+export function ChromePagerTools({
+  search,
+  setSearch,
+  pagerLabel,
+  pager,
+  view,
+  setView,
+}: Pick<BackendChromeContext, 'search' | 'setSearch' | 'pagerLabel' | 'pager' | 'view' | 'setView'>) {
+  return (
+    <div className="o-be-tools">
+      <label className="o-be-search">
+        <SearchIcon />
+        <input
+          placeholder="Search..."
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+      </label>
+      <div className="o-be-control__right">
+        <span className="o-be-pager">{pagerLabel}</span>
+        <div className="o-be-page-btns">
+          <button type="button" className="o-be-icon o-be-icon--bare" aria-label="Previous" disabled={!pager?.canPrev} onClick={() => pager?.onPrev()}>
+            <ChevronIcon dir="left" />
+          </button>
+          <button type="button" className="o-be-icon o-be-icon--bare" aria-label="Next" disabled={!pager?.canNext} onClick={() => pager?.onNext()}>
+            <ChevronIcon dir="right" />
+          </button>
+        </div>
+        <div className="o-be-view-switch">
+          <button
+            type="button"
+            className={`o-be-icon o-be-icon--bare${view === 'list' ? ' is-on' : ''}`}
+            aria-label="List"
+            onClick={() => setView('list')}
+          >
+            <ListIcon />
+          </button>
+          <button
+            type="button"
+            className={`o-be-icon o-be-icon--bare${view === 'kanban' ? ' is-on' : ''}`}
+            aria-label="Kanban"
+            onClick={() => setView('kanban')}
+          >
+            <KanbanIcon />
+          </button>
+          <button
+            type="button"
+            className={`o-be-icon o-be-icon--bare${view === 'activity' ? ' is-on' : ''}`}
+            aria-label="Activity"
+            onClick={() => setView('activity')}
+          >
+            <ActivityIcon />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function defaultView(pathname: string): ChromeView {
   try {
     const stored = sessionStorage.getItem(`gk-view:${pathname}`);
@@ -175,19 +192,19 @@ function controlTitle(pathname: string) {
   if (pathname.includes('/backend/sessions')) return 'Sessions';
   if (pathname.includes('/backend/payments')) return 'Payments';
   if (pathname.includes('/backend/preparation')) return 'Activity Schedule';
-  if (pathname.includes('/backend/membership-requests')) return 'Membership requests';
-  if (pathname.includes('/backend/memberships')) return 'Memberships';
-  if (pathname.includes('/backend/visitors') || pathname.includes('/backend/members')) return 'Visitors';
+  if (pathname.includes('/backend/membership-requests')) return 'Active users';
+  if (pathname.includes('/backend/memberships') || pathname.includes('/backend/plans')) return 'Active users';
+  if (pathname.includes('/backend/people') || pathname.includes('/backend/visitors') || pathname.includes('/backend/members')) return 'Active users';
   if (pathname.includes('/backend/trainer-requests')) return 'Trainer requests';
-  if (pathname.includes('/backend/plans')) return 'Memberships';
   if (pathname.includes('/backend/trainers')) return 'Trainers';
   if (pathname.includes('/backend/shift')) return 'Shift';
   if (pathname.includes('/backend/employees')) return 'Employees';
-  if (pathname.includes('/backend/facilities')) return 'Facilities';
+  if (pathname.includes('/backend/facilities')) return 'Activities';
   if (pathname.includes('/backend/maintenance')) return 'Maintenance';
   if (pathname.includes('/backend/check-in')) return 'Check-in';
   if (pathname.includes('/backend/classes') || pathname.includes('/backend/participants')) return 'Classes & Coaching';
   if (pathname.includes('/backend/rentals')) return 'Equipment Rentals';
+  if (pathname.includes('/backend/communications')) return 'Communications';
   if (pathname.includes('/backend/notifications')) return 'Notifications';
   if (pathname.includes('/backend/customers') || pathname.endsWith('/customers')) return 'Members';
   if (pathname.includes('/backend/products')) return 'Services & Products';
@@ -202,7 +219,6 @@ export function OdooBackendLayout() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const initial = (user?.name ?? 'S').trim().charAt(0).toUpperCase() || 'S';
-  const [menuKey, setMenuKey] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [titleOpen, setTitleOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -210,10 +226,12 @@ export function OdooBackendLayout() {
   const [view, setViewState] = useState<ChromeView>(() => defaultView(pathname));
   const [pager, setPager] = useState<ChromePager | null>(null);
   const [listPath, setListPath] = useState<string | null>(null);
-  const ordersRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLDivElement>(null);
   const title = controlTitle(pathname);
+  const peopleOn = deskLinkActive('/pos/backend/people', pathname);
+  const commsOn = deskLinkActive('/pos/backend/communications', pathname);
+  const peopleList = isPeopleListPath(pathname);
 
   function setView(next: ChromeView) {
     setViewState(next);
@@ -227,16 +245,14 @@ export function OdooBackendLayout() {
   }
 
   useEffect(() => {
-    if (!menuKey && !menuOpen && !titleOpen) return;
+    if (!menuOpen && !titleOpen) return;
     function onDoc(e: MouseEvent) {
       const target = e.target as Node;
-      if (menuKey && !ordersRef.current?.contains(target)) setMenuKey(null);
       if (menuOpen && !menuRef.current?.contains(target)) setMenuOpen(false);
       if (titleOpen && !titleRef.current?.contains(target)) setTitleOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        setMenuKey(null);
         setMenuOpen(false);
         setTitleOpen(false);
       }
@@ -248,14 +264,13 @@ export function OdooBackendLayout() {
       document.removeEventListener('click', onDoc);
       document.removeEventListener('keydown', onKey);
     };
-  }, [menuKey, menuOpen, titleOpen]);
+  }, [menuOpen, titleOpen]);
 
   useLayoutEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname]);
 
   useEffect(() => {
-    setMenuKey(null);
     setMenuOpen(false);
     setTitleOpen(false);
     setSearch('');
@@ -269,75 +284,19 @@ export function OdooBackendLayout() {
           <BrandMark />
           <span>Gymkhana</span>
         </div>
-        <nav className="o-be-nav__links">
-          <NavLink to="/pos" end className={({ isActive }) => `o-be-nav__link${isActive ? ' is-active' : ''}`}>
-            Dashboard
-          </NavLink>
-
-          {NAV_MENUS.map((menu) => {
-            const sectionOn = menu.items.some((item) => pathname.startsWith(item.to));
-            const opened = menuKey === menu.label;
-            return (
-              <div key={menu.label} className={`o-be-nav__menu${opened ? ' is-open' : ''}`} ref={opened ? ordersRef : undefined}>
-                <button
-                  type="button"
-                  className={`o-be-nav__link o-be-nav__link--menu${sectionOn ? ' is-active' : ''}${opened ? ' is-open' : ''}`}
-                  aria-expanded={opened}
-                  aria-haspopup="menu"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setMenuKey((current) => (current === menu.label ? null : menu.label));
-                  }}
-                >
-                  {menu.label}
-                </button>
-                {opened ? (
-                  <div className="o-be-dropdown" role="menu" onClick={(e) => e.stopPropagation()}>
-                    {menu.items.map((item) => (
-                      <button
-                        key={item.to}
-                        type="button"
-                        role="menuitem"
-                        className={`o-be-dropdown__item${pathname.startsWith(item.to) ? ' is-on' : ''}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setMenuKey(null);
-                          navigate(item.to);
-                        }}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-
-          <NavLink to="/pos/backend/products" className={({ isActive }) => `o-be-nav__link${isActive ? ' is-active' : ''}`}>
-            Services & Products
-          </NavLink>
-          <NavLink to="/pos/backend/config" className={({ isActive }) => `o-be-nav__link${isActive ? ' is-active' : ''}`}>
-            Settings
-          </NavLink>
+        <nav className="o-be-nav__links o-be-nav__links--desk">
+          {EMPLOYEE_LINKS.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={'end' in item ? item.end : false}
+              className={() => `o-be-nav__link${deskLinkActive(item.to, pathname, 'end' in item && item.end) ? ' is-active' : ''}`}
+            >
+              {item.label}
+            </NavLink>
+          ))}
         </nav>
         <div className="o-be-nav__right">
-          <label className="o-search o-search--nav">
-            <SearchIcon />
-            <input
-              placeholder="Search services..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </label>
-          <button
-            type="button"
-            className="o-icon-btn"
-            aria-label="Bag"
-            onClick={() => navigate('/pos/backend/products')}
-          >
-            <BagIcon />
-          </button>
           <button
             type="button"
             className="o-avatar o-avatar--bw"
@@ -361,14 +320,14 @@ export function OdooBackendLayout() {
             </button>
             {menuOpen ? (
               <div className="o-be-dropdown o-be-dropdown--right" role="menu" onClick={(e) => e.stopPropagation()}>
-                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/app/register'); }}>
-                  Open POS
+                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/check-in'); }}>
+                  Check-in
                 </button>
-                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/products'); }}>
-                  Services & Products
+                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/people'); }}>
+                  Active users
                 </button>
-                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/visitors'); }}>
-                  Visitors
+                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/communications'); }}>
+                  Communications
                 </button>
                 <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/notifications'); }}>
                   Notifications
@@ -395,7 +354,7 @@ export function OdooBackendLayout() {
           {pathname.includes('/backend/preparation') ? (
             <button type="button" className="o-prep-new" onClick={() => navigate('/pos/prep')}>New</button>
           ) : null}
-          <div className="o-be-control__title">{title}</div>
+          {peopleOn ? <ActiveUserSubnav /> : commsOn ? <CommunicationsSubnav /> : <div className="o-be-control__title">{title}</div>}
           <div className="o-be-title-menu" ref={titleRef}>
             <button
               type="button"
@@ -431,51 +390,16 @@ export function OdooBackendLayout() {
             ) : null}
           </div>
         </div>
-        <label className="o-be-search">
-          <SearchIcon />
-          <input
-            placeholder="Search..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+        {peopleList ? null : (
+          <ChromePagerTools
+            search={search}
+            setSearch={setSearch}
+            pagerLabel={pagerLabel}
+            pager={pager}
+            view={view}
+            setView={setView}
           />
-        </label>
-        <div className="o-be-control__right">
-          <span className="o-be-pager">{pagerLabel}</span>
-          <div className="o-be-page-btns">
-            <button type="button" className="o-be-icon o-be-icon--bare" aria-label="Previous" disabled={!pager?.canPrev} onClick={() => pager?.onPrev()}>
-              <ChevronIcon dir="left" />
-            </button>
-            <button type="button" className="o-be-icon o-be-icon--bare" aria-label="Next" disabled={!pager?.canNext} onClick={() => pager?.onNext()}>
-              <ChevronIcon dir="right" />
-            </button>
-          </div>
-          <div className="o-be-view-switch">
-            <button
-              type="button"
-              className={`o-be-icon o-be-icon--bare${view === 'list' ? ' is-on' : ''}`}
-              aria-label="List"
-              onClick={() => setView('list')}
-            >
-              <ListIcon />
-            </button>
-            <button
-              type="button"
-              className={`o-be-icon o-be-icon--bare${view === 'kanban' ? ' is-on' : ''}`}
-              aria-label="Kanban"
-              onClick={() => setView('kanban')}
-            >
-              <KanbanIcon />
-            </button>
-            <button
-              type="button"
-              className={`o-be-icon o-be-icon--bare${view === 'activity' ? ' is-on' : ''}`}
-              aria-label="Activity"
-              onClick={() => setView('activity')}
-            >
-              <ActivityIcon />
-            </button>
-          </div>
-        </div>
+        )}
       </div>
 
       <div className="o-be-body">

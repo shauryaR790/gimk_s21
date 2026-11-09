@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { PosProvider } from './PosContext';
 import { OdooBackendLayout } from './odoo/OdooBackendLayout';
 import { OdooFoHLayout } from './odoo/OdooFoHLayout';
@@ -21,12 +21,11 @@ import {
   MaintenancePage,
   MembersPage,
   ShiftPage,
-  MembershipRequestsPage,
-  MembershipsPage,
   NotificationsPage,
   SessionsPage,
   TrainerRequestsPage,
 } from './gym/centre';
+import { CommunicationsPage } from './gym/comms';
 import {
   BookingRecordPage,
   FacilityRecordPage,
@@ -47,6 +46,11 @@ function RedirectRegister() {
   return <Navigate to={`/pos/app/register${search}`} replace />;
 }
 
+function VisitorToPeople() {
+  const { id } = useParams();
+  return <Navigate to={`/pos/backend/people/${id ?? ''}`} replace />;
+}
+
 export default function PosShell() {
   return (
     <PosProvider>
@@ -58,15 +62,18 @@ export default function PosShell() {
           <Route path="backend/sessions" element={<SessionsPage />} />
           <Route path="backend/payments" element={<BackendPlaceholderPage title="Payments" />} />
           <Route path="backend/preparation" element={<Navigate to="/pos/backend/classes" replace />} />
-          <Route path="backend/customers" element={<Navigate to="/pos/backend/members" replace />} />
-          <Route path="backend/members" element={<Navigate to="/pos/backend/visitors" replace />} />
-          <Route path="backend/visitors/new" element={<VisitorRecordPage />} />
-          <Route path="backend/visitors/:id" element={<VisitorRecordPage />} />
-          <Route path="backend/visitors" element={<MembersPage />} />
+          <Route path="backend/customers" element={<Navigate to="/pos/backend/people" replace />} />
+          <Route path="backend/members" element={<Navigate to="/pos/backend/people" replace />} />
+          <Route path="backend/people/new" element={<VisitorRecordPage />} />
+          <Route path="backend/people/:id" element={<VisitorRecordPage />} />
+          <Route path="backend/people" element={<MembersPage />} />
+          <Route path="backend/visitors/new" element={<Navigate to="/pos/backend/people/new" replace />} />
+          <Route path="backend/visitors/:id" element={<VisitorToPeople />} />
+          <Route path="backend/visitors" element={<Navigate to="/pos/backend/people" replace />} />
           <Route path="backend/shift/new" element={<ShiftRecordPage />} />
           <Route path="backend/shift/:id" element={<ShiftRecordPage />} />
           <Route path="backend/shift" element={<ShiftPage />} />
-          <Route path="backend/memberships" element={<MembershipsPage />} />
+          <Route path="backend/memberships" element={<Navigate to="/pos/backend/people?tab=members" replace />} />
           <Route path="backend/plans/new" element={<PlanRecordPage />} />
           <Route path="backend/plans/:id" element={<PlanRecordPage />} />
           <Route path="backend/trainers/new" element={<TrainerRecordPage />} />
@@ -74,7 +81,7 @@ export default function PosShell() {
           <Route path="backend/trainers" element={<Navigate to="/pos/backend/classes" replace />} />
           <Route path="backend/trainer-requests" element={<TrainerRequestsPage />} />
           <Route path="backend/trainer-requests/:id" element={<JoinRequestRecordPage route="TRAINER" />} />
-          <Route path="backend/membership-requests" element={<MembershipRequestsPage />} />
+          <Route path="backend/membership-requests" element={<Navigate to="/pos/backend/people?tab=requests" replace />} />
           <Route path="backend/membership-requests/:id" element={<JoinRequestRecordPage route="STAFF" />} />
           <Route path="backend/facilities/new" element={<FacilityRecordPage />} />
           <Route path="backend/facilities/:id" element={<FacilityRecordPage />} />
@@ -91,6 +98,9 @@ export default function PosShell() {
           <Route path="backend/maintenance/:id" element={<MaintenanceRecordPage />} />
           <Route path="backend/maintenance" element={<MaintenancePage />} />
           <Route path="backend/notifications" element={<NotificationsPage />} />
+          <Route path="backend/communications/reports/:id" element={<CommunicationsPage />} />
+          <Route path="backend/communications/:tab" element={<CommunicationsPage />} />
+          <Route path="backend/communications" element={<CommunicationsPage />} />
           <Route path="backend/products" element={<ProductsKanbanPage />} />
           <Route path="backend/inventory/new" element={<InventoryRecordPage />} />
           <Route path="backend/inventory/:id" element={<InventoryRecordPage />} />

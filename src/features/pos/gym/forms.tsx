@@ -8,6 +8,7 @@ import { SlotGrid, type HeldSlot } from './slots';
 import { api } from '../../../lib/api';
 import { readIdImage } from '../../../lib/idImage';
 import { pushToast } from '../../../components/Toast';
+import { getDeskMode } from '../staffSession';
 import { usePos } from '../PosContext';
 import {
   BOOKING_STATUS,
@@ -60,6 +61,14 @@ type Member = {
   notes?: string;
   notifyPrefs?: string;
   isMember?: boolean;
+  hereNow?: string;
+  hereSport?: string;
+  lastInAt?: string;
+  visits?: number;
+  tappedToday?: boolean;
+  emergencyContact?: string;
+  registeredAt?: string;
+  consentStatus?: string;
 };
 type Booking = {
   id: string;
@@ -154,11 +163,14 @@ export function VisitorRecordPage() {
   const [access, setAccess] = useState('');
   const [govt, setGovt] = useState('');
   const [photo, setPhoto] = useState('');
+  const [idShot, setIdShot] = useState('');
   const [coachId, setCoachId] = useState('');
   const [planId, setPlanId] = useState('');
   const [notes, setNotes] = useState('');
   const [sms, setSms] = useState(true);
   const [mail, setMail] = useState(true);
+  const [waConsent, setWaConsent] = useState('UNKNOWN');
+  const [waMarketing, setWaMarketing] = useState('UNKNOWN');
   const [profile, setProfile] = useState<{
     member: Member;
     bookings: { id: string; facility: string; start_at: string; status: string; payment_status: string; amount: number }[];
@@ -166,6 +178,8 @@ export function VisitorRecordPage() {
     checkIns: { id: string; facility_name: string; kind: string; checked_in_at: string; checked_out_at: string | null }[];
     outstanding: number;
     timeUsedMinutes: number;
+    consent?: { status: string; marketing_status: string };
+    messages?: { id: string; template_key: string; status: string; error_message: string; created_at: string }[];
   } | null>(null);
   const trainers = useList<Trainer>('/api/gym/trainers', (data) => (data as { trainers: Trainer[] }).trainers);
   const plans = useList<Plan>('/api/gym/plans', (data) => (data as { plans: Plan[] }).plans);
@@ -180,12 +194,15 @@ export function VisitorRecordPage() {
     setEmail(data.member.email);
     setAccess(data.member.accessInterest ?? '');
     setGovt(data.member.govtIdLabel ?? '');
-    setPhoto(data.member.photoUrl || data.member.govtIdUrl || '');
+    setPhoto(data.member.photoUrl || '');
+    setIdShot(data.member.govtIdUrl || '');
     setCoachId(data.member.coachId ?? '');
     setNotes(data.member.notes ?? '');
     const prefs = (data.member.notifyPrefs ?? 'sms,email').split(',');
     setSms(prefs.includes('sms'));
     setMail(prefs.includes('email'));
+    setWaConsent(data.consent?.status || data.member.consentStatus || 'UNKNOWN');
+    setWaMarketing(data.consent?.marketing_status || 'UNKNOWN');
     setPlanId('');
   }, [id, isNew]);
 
@@ -198,9 +215,12 @@ export function VisitorRecordPage() {
       setAccess('');
       setGovt('');
       setPhoto('');
+      setIdShot('');
       setCoachId('');
       setPlanId('');
       setNotes('');
+      setWaConsent('UNKNOWN');
+      setWaMarketing('UNKNOWN');
       return;
     }
     void load().catch(() => undefined);
@@ -219,8 +239,8 @@ export function VisitorRecordPage() {
         mobile,
         email,
         accessInterest: access,
-        govtIdLabel: govt,
-        govtIdUrl: member?.govtIdUrl || '',
+        govtIdLabel: govt || (idShot ? 'Government ID photo' : ''),
+        govtIdUrl: idShot,
         photoUrl: photo,
         coachId,
         notes,
@@ -229,12 +249,14 @@ export function VisitorRecordPage() {
       };
       if (isNew) {
         const created = await api<{ member: { id: string } }>('/api/gym/members', { method: 'POST', body: JSON.stringify(body) });
-        pushToast('Visitor saved');
-        navigate(`/pos/backend/visitors/${created.member.id}`, { replace: true });
+        await api(`/api/gym/members/${created.member.id}/consent`, { method: 'POST', body: JSON.stringify({ status: waConsent, marketingStatus: waMarketing }) });
+        pushToast('Member saved');
+        navigate(`/pos/backend/people/${created.member.id}`, { replace: true });
         return;
       }
       await api(`/api/gym/members/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
-      pushToast('Visitor saved');
+      await api(`/api/gym/members/${id}/consent`, { method: 'POST', body: JSON.stringify({ status: waConsent, marketingStatus: waMarketing }) });
+      pushToast('Member saved');
       await load();
       setRefreshKey((value) => value + 1);
     });
@@ -252,21 +274,66 @@ export function VisitorRecordPage() {
       )}
       right={(
         <>
-          <Field label="Government ID"><input value={govt} aria-label="Government ID" placeholder="Aadhaar ending 4412" onChange={(event) => setGovt(event.target.value)} /></Field>
+          <Field label="Government ID">
+            {idShot ? <img className="gk-id" src={idShot} alt="Government ID" /> : <em>Upload ID photo</em>}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              aria-label="Government ID photo"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (!file) return;
+                void readIdImage(file).then((url) => {
+                  setIdShot(url);
+                  if (!govt) setGovt('Government ID photo');
+                }).catch((err: unknown) => pushToast(err instanceof Error ? err.message : 'Use a photo of the ID.'));
+              }}
+            />
+          </Field>
           <Field label="Membership"><Dropdown variant="field" label="Membership" value={planId} options={planChoices} onChange={setPlanId} /></Field>
-          <Field label="Status"><strong>{member ? `${member.isMember ? 'Member' : 'Visitor'} · ${member.memberCode}${member.isMember && member.expiresAt ? ` · until ${member.expiresAt.slice(0, 10)}` : ''}` : 'New visitor'}</strong></Field>
+          <Field label="Status"><strong>{member ? `${member.isMember ? 'Member' : 'Pending'} · ${member.memberCode}${member.isMember && member.expiresAt ? ` · until ${member.expiresAt.slice(0, 10)}` : ''}` : 'New member'}</strong></Field>
+          <Field label="Where now"><strong>{member?.hereNow ? (member.hereSport || member.hereNow) : 'Not in'}</strong></Field>
+          <Field label="Last tap"><strong>{member?.lastInAt ? (member.tappedToday ? `Today ${clock(member.lastInAt)}` : stamp(member.lastInAt)) : 'Never'}</strong></Field>
+          <Field label="Visits"><strong>{member?.visits ?? profile?.checkIns.length ?? 0}</strong></Field>
           <Field label="Time on services"><strong>{profile ? `${profile.timeUsedMinutes} minutes` : '—'}</strong></Field>
           <Field label="Outstanding"><strong>{profile ? formatINR(profile.outstanding) : '—'}</strong></Field>
+          <Field label="WhatsApp">
+            <Dropdown
+              variant="field"
+              label="WhatsApp"
+              value={waConsent}
+              options={[
+                { value: 'UNKNOWN', label: 'Unknown' },
+                { value: 'OPT_IN', label: 'Opted in' },
+                { value: 'OPT_OUT', label: 'Opted out' },
+              ]}
+              onChange={setWaConsent}
+            />
+          </Field>
+          <Field label="Marketing WhatsApp">
+            <Dropdown
+              variant="field"
+              label="Marketing WhatsApp"
+              value={waMarketing}
+              options={[
+                { value: 'UNKNOWN', label: 'Unknown' },
+                { value: 'OPT_IN', label: 'Opted in' },
+                { value: 'OPT_OUT', label: 'Opted out' },
+              ]}
+              onChange={setWaMarketing}
+            />
+          </Field>
         </>
       )}
     />
   );
 
   return (
-    <RecordForm
-      kind="Visitor"
+      <RecordForm
+      kind="Member"
       recordId={isNew ? undefined : id}
-      crumb={{ label: 'Visitors', to: '/pos/backend/visitors' }}
+      crumb={{ label: 'Active users', to: '/pos/backend/people' }}
       name={name}
       onName={setName}
       namePlaceholder="e.g. Asha Menon"
@@ -275,8 +342,8 @@ export function VisitorRecordPage() {
         { label: 'Email updates', checked: mail, onChange: setMail },
       ]}
       photo={{ url: photo, label: 'Photograph', onChange: (url) => setPhoto(url) }}
-      documents={photo ? 1 : 0}
-      pager={pagerFor(people.map((row) => row.id), id, '/pos/backend/visitors')}
+      documents={(photo ? 1 : 0) + (idShot ? 1 : 0)}
+      pager={pagerFor(people.map((row) => row.id), id, '/pos/backend/people')}
       tabs={[
         { id: 'general', label: 'General Information', content: general },
         {
@@ -291,15 +358,20 @@ export function VisitorRecordPage() {
         },
         {
           id: 'checkins',
-          label: 'Check-ins',
-          content: <TabTable head={['Place', 'Kind', 'In', 'Out']} empty="No check-ins yet" rows={(profile?.checkIns ?? []).map((row) => [row.facility_name, row.kind, stamp(row.checked_in_at), row.checked_out_at ? stamp(row.checked_out_at) : 'Inside now'])} />,
+          label: 'Visits',
+          content: <TabTable head={['Place', 'Kind', 'In', 'Out']} empty="No visits yet — they appear after this person scans a court QR" rows={(profile?.checkIns ?? []).map((row) => [row.facility_name, row.kind, stamp(row.checked_in_at), row.checked_out_at ? stamp(row.checked_out_at) : 'Inside now'])} />,
+        },
+        {
+          id: 'messages',
+          label: 'WhatsApp',
+          content: <TabTable head={['Template', 'Status', 'When', 'Error']} empty="No WhatsApp messages yet" rows={(profile?.messages ?? []).map((row) => [row.template_key, row.status, stamp(row.created_at), row.error_message || '—'])} />,
         },
       ]}
       notes={{ value: notes, onChange: setNotes }}
       error={error}
       busy={busy}
       onSave={submit}
-      onDiscard={() => (isNew ? navigate('/pos/backend/visitors') : void load())}
+      onDiscard={() => (isNew ? navigate('/pos/backend/people') : void load())}
       refreshKey={refreshKey}
     />
   );
@@ -388,7 +460,7 @@ export function PlanRecordPage() {
     <RecordForm
       kind="Plan"
       recordId={isNew ? undefined : id}
-      crumb={{ label: 'Memberships', to: '/pos/backend/memberships' }}
+      crumb={{ label: 'Active users', to: '/pos/backend/people?tab=plans' }}
       name={name}
       onName={setName}
       namePlaceholder="e.g. Monthly"
@@ -432,7 +504,7 @@ export function PlanRecordPage() {
       error={error}
       busy={busy}
       onSave={submit}
-      onDiscard={() => (isNew ? navigate('/pos/backend/memberships') : void load())}
+      onDiscard={() => (isNew ? navigate('/pos/backend/people?tab=plans') : void load())}
       refreshKey={refreshKey}
     />
   );
@@ -673,7 +745,7 @@ export function FacilityRecordPage() {
     <RecordForm
       kind="Facility"
       recordId={isNew ? undefined : id}
-      crumb={{ label: 'Facilities', to: '/pos/backend/facilities' }}
+      crumb={{ label: 'Activities', to: '/pos/backend/facilities' }}
       name={name}
       onName={setName}
       namePlaceholder="e.g. Badminton Court 3"
@@ -1213,7 +1285,9 @@ export function ShiftRecordPage() {
   const isNew = !id || id === 'new';
   const { busy, error, save } = useSaver();
   const [refreshKey, setRefreshKey] = useState(0);
-  const [role, setRole] = useState(query.get('role') === 'trainer' ? 'TRAINER' : 'STAFF');
+  const desk = getDeskMode();
+  const lockedRole = desk === 'trainer' ? 'TRAINER' : desk === 'employee' ? 'STAFF' : null;
+  const [role, setRole] = useState(lockedRole ?? (query.get('role') === 'trainer' ? 'TRAINER' : 'STAFF'));
   const [trainerId, setTrainerId] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -1264,6 +1338,10 @@ export function ShiftRecordPage() {
   useEffect(() => {
     void load().catch(() => undefined);
   }, [load]);
+
+  useEffect(() => {
+    if (lockedRole) setRole(lockedRole);
+  }, [lockedRole]);
 
   useEffect(() => {
     if (!isNew) return;
@@ -1410,7 +1488,7 @@ export function ShiftRecordPage() {
             <Grid
               left={(
                 <>
-                  <Choice label="Role" required name="shift-role" value={role} disabled={!isNew} options={[{ value: 'STAFF', label: 'Staff' }, { value: 'TRAINER', label: 'Trainer' }]} onChange={setRole} />
+                  {lockedRole ? null : <Choice label="Role" required name="shift-role" value={role} disabled={!isNew} options={[{ value: 'STAFF', label: 'Staff' }, { value: 'TRAINER', label: 'Trainer' }]} onChange={setRole} />}
                   {isTrainer ? (
                     <Field label="Trainer" required>
                       <Dropdown variant="field" label="Trainer" value={trainerId} placeholder="Choose a trainer" disabled={!isNew} options={trainers.map((row) => ({ value: row.id, label: `${row.name} · ${row.specialization}` }))} onChange={pickTrainer} />
@@ -1892,7 +1970,7 @@ export function JoinRequestRecordPage({ route }: { route: 'TRAINER' | 'STAFF' })
     <RecordForm
       kind="Request"
       recordId={id}
-      crumb={{ label: route === 'TRAINER' ? 'Trainer requests' : 'Membership requests', to: base }}
+      crumb={{ label: route === 'TRAINER' ? 'Trainer requests' : 'Active users', to: route === 'TRAINER' ? base : '/pos/backend/people?tab=requests' }}
       name={name}
       onName={setName}
       namePlaceholder="Applicant name"

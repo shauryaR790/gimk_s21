@@ -12,6 +12,7 @@
     { "source": "/qr/:path*", "destination": "/index.html" },
     { "source": "/register", "destination": "/index.html" },
     { "source": "/login", "destination": "/index.html" },
+    { "source": "/in/:path*", "destination": "/index.html" },
     { "source": "/pos", "destination": "/index.html" },
     { "source": "/pos/:path*", "destination": "/index.html" }
   ]

@@ -104,7 +104,15 @@ app.use((req, res, next) => {
     next();
     return;
   }
-  express.json({ limit: req.path.startsWith('/api/gym/') || req.path === '/api/portal/join' || req.path === '/api/portal/login' ? '3mb' : '256kb' })(req, res, next);
+  const limit = req.path.startsWith('/api/gym/') || req.path === '/api/portal/join' || req.path === '/api/portal/login' ? '3mb' : '256kb';
+  express.json({
+    limit,
+    verify: (request, _response, buf) => {
+      if (request.url?.startsWith('/api/webhooks/whatsapp')) {
+        (request as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+      }
+    },
+  })(req, res, next);
 });
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');

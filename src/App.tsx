@@ -4,6 +4,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoadingState } from './components/LoadingState';
 import { ToastHost } from './components/Toast';
 import { LoginPage } from './features/pos/LoginPage';
+import { GatePage } from './features/site/GatePage';
 import { LoginPage as SiteLoginPage } from './features/site/LoginPage';
 import { RegisterPage } from './features/site/RegisterPage';
 import { SiteHome } from './features/site/SiteHome';
@@ -40,6 +41,7 @@ export function App() {
           <Route path="/" element={<SiteHome />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/login" element={<SiteLoginPage />} />
+          <Route path="/in/:sport" element={<GatePage />} />
           <Route path="/pos/login" element={<LoginPage />} />
           <Route path="/pos/*" element={<Suspense fallback={<div className="o-screen-state"><LoadingState label="Loading" /></div>}><PosShell /></Suspense>} />
           <Route path="*" element={<Navigate to="/" replace />} />

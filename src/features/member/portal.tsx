@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { formatINR } from '../../../shared/domain';
 import { api } from '../../lib/api';
+import { clearMemberPass, saveMemberPass } from '../../lib/memberPass';
 import { useTitle } from '../../lib/useTitle';
 
 type Home = {
@@ -250,7 +251,8 @@ export function MemberProfilePage() {
   async function login(event: FormEvent) {
     event.preventDefault();
     try {
-      await api('/api/portal/login', { method: 'POST', body: JSON.stringify({ mobile }) });
+      const data = await api<{ ok: boolean; memberToken?: string }>('/api/portal/login', { method: 'POST', body: JSON.stringify({ mobile }) });
+      saveMemberPass(data.memberToken);
       setNote('Signed in.');
       await reload();
     } catch (err) {
@@ -278,7 +280,7 @@ export function MemberProfilePage() {
           <label>Emergency contact <input value={emergency} onChange={(event) => setEmergency(event.target.value)} /></label>
           <label>Notifications <input value={prefs} onChange={(event) => setPrefs(event.target.value)} /></label>
           <button type="submit">Save</button>
-          <button type="button" onClick={() => void api('/api/portal/logout', { method: 'POST', body: '{}' }).then(reload)}>Sign out</button>
+          <button type="button" onClick={() => { clearMemberPass(); void api('/api/portal/logout', { method: 'POST', body: '{}' }).then(reload); }}>Sign out</button>
         </form>
       ) : null}
       {note ? <p>{note}</p> : null}

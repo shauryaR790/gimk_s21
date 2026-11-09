@@ -8,9 +8,11 @@ import { all, get, run, tx } from './db';
 import { createStaffOrder, loadCatalog, markPaid, retimeOrder } from './logic';
 import { priceCart } from '../shared/domain';
 import { createRazorpayOrder, publicRazorpayKey, RazorpayError, verifyRazorpayPayment } from './razorpay';
-import { matchActivity, SIGNUP_ACTIVITIES } from '../shared/activities';
+import { ARENA_SPORTS, arenaSlug, listedArenas, matchActivity, matchArena, SIGNUP_ACTIVITIES, sportFromSlug } from '../shared/activities';
+import { GOVT_ID_TYPES, normalizeGovtId } from '../shared/govtId';
 import { normalizeSlots, slotLabel, slotsBetween, summarizeSlots } from '../shared/slots';
 import { TASK_CATEGORIES, TASK_PRIORITIES } from '../shared/maintenance';
+import * as comms from './comms';
 
 export const STAFF_ROLES = [
   'SUPER_ADMIN',
@@ -56,26 +58,37 @@ function safeEqual(a: string, b: string) {
   return timingSafeEqual(left, right);
 }
 
-export function memberCookie(customerId: string) {
-  const exp = Date.now() + 12 * 60 * 60 * 1000;
+const MEMBER_MAX_AGE_SEC = 400 * 24 * 60 * 60;
+
+export function memberPass(customerId: string) {
+  const exp = Date.now() + MEMBER_MAX_AGE_SEC * 1000;
   const body = `m1.${customerId}.${exp}`;
-  const token = `${body}.${sign(body)}`;
-  const secure = isProduction() ? '; Secure' : '';
-  return `gym_member=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${12 * 60 * 60}${secure}`;
+  return `${body}.${sign(body)}`;
 }
 
-export function readMemberId(header: string | undefined) {
-  if (!header) return null;
-  const match = header.split(';').map((part) => part.trim()).find((part) => part.startsWith('gym_member='));
-  if (!match) return null;
-  const token = decodeURIComponent(match.slice('gym_member='.length));
-  const parts = token.split('.');
+export function memberCookie(customerId: string, pass = memberPass(customerId)) {
+  const secure = isProduction() ? '; Secure' : '';
+  return `gym_member=${encodeURIComponent(pass)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${MEMBER_MAX_AGE_SEC}${secure}`;
+}
+
+export function readMemberPass(token: string | undefined | null) {
+  if (!token) return null;
+  const parts = token.trim().split('.');
   if (parts.length !== 4 || parts[0] !== 'm1') return null;
   const [, customerId, expStr, sig] = parts;
   const body = `m1.${customerId}.${expStr}`;
   if (!safeEqual(sign(body), sig)) return null;
   if (Number(expStr) < Date.now()) return null;
   return customerId;
+}
+
+export function readMemberId(header: string | undefined, pass?: string | null) {
+  const fromPass = readMemberPass(pass);
+  if (fromPass) return fromPass;
+  if (!header) return null;
+  const match = header.split(';').map((part) => part.trim()).find((part) => part.startsWith('gym_member='));
+  if (!match) return null;
+  return readMemberPass(decodeURIComponent(match.slice('gym_member='.length)));
 }
 
 function digits(mobile: string) {
@@ -204,7 +217,7 @@ export function listPlans(includeInactive = true) {
   return rows.map(mapPlan);
 }
 
-export function listMembers(filter = 'all', query = '') {
+export function listMembers(filter = 'all', query = '', extra: { sport?: string; from?: string; to?: string } = {}) {
   const rows = all<{
     id: string;
     name: string;
@@ -238,10 +251,34 @@ export function listMembers(filter = 'all', query = '') {
   );
   const needle = query.trim().toLowerCase();
   const soon = Date.now() + 14 * 24 * 60 * 60 * 1000;
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const openBy = new Map(
+    all<{ customer_id: string; facility_name: string; checked_in_at: string }>(
+      'SELECT customer_id, facility_name, checked_in_at FROM check_ins WHERE cafe_id = ? AND checked_out_at IS NULL AND customer_id IS NOT NULL',
+      [CAFE_ID],
+    ).map((row) => [row.customer_id, row]),
+  );
+  const tapBy = new Map(
+    all<{ customer_id: string; last_in: string; visits: number }>(
+      'SELECT customer_id, MAX(checked_in_at) AS last_in, COUNT(*) AS visits FROM check_ins WHERE cafe_id = ? AND customer_id IS NOT NULL GROUP BY customer_id',
+      [CAFE_ID],
+    ).map((row) => [row.customer_id, row]),
+  );
+  const consentBy = comms.consentMap();
+  const lastWa = comms.lastMessageByCustomer();
+  const upcomingBy = new Set(
+    all<{ customer_id: string }>(
+      `SELECT DISTINCT customer_id FROM bookings WHERE cafe_id = ? AND status IN ('CONFIRMED','CHECKED_IN') AND start_at >= ? AND customer_id IS NOT NULL AND customer_id != ''`,
+      [CAFE_ID, nowIso()],
+    ).map((row) => row.customer_id),
+  );
   return rows
     .map((row) => {
       const membership = activeMembership(row.id);
       const status = membership?.status ?? row.membership_status;
+      const open = openBy.get(row.id);
+      const tap = tapBy.get(row.id);
+      const hereNow = open?.facility_name ?? '';
       return {
         id: row.id,
         name: row.name,
@@ -264,16 +301,47 @@ export function listMembers(filter = 'all', query = '') {
         notes: row.notes ?? '',
         notifyPrefs: row.notify_prefs ?? '',
         isMember: status === 'ACTIVE',
+        hereNow,
+        hereSport: hereNow ? matchArena(hereNow) || hereNow : '',
+        lastInAt: tap?.last_in ?? '',
+        visits: tap?.visits ?? 0,
+        tappedToday: Boolean(tap?.last_in && new Date(tap.last_in).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) === today),
+        consentStatus: consentBy.get(row.id) ?? 'UNKNOWN',
+        lastWhatsAppAt: lastWa.get(row.id)?.lastWhatsAppAt ?? '',
+        lastWhatsAppStatus: lastWa.get(row.id)?.lastWhatsAppStatus ?? '',
+        hasUpcoming: upcomingBy.has(row.id),
       };
     })
     .filter((member) => {
       if (needle) {
-        const hay = `${member.name} ${member.mobile} ${member.memberCode} ${member.email} ${member.accessInterest} ${member.coachName}`.toLowerCase();
+        const hay = `${member.name} ${member.mobile} ${member.memberCode} ${member.email} ${member.accessInterest} ${member.coachName} ${member.govtIdLabel} ${member.hereNow}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
+      if (extra.sport) {
+        const hay = `${member.accessInterest} ${member.hereSport}`.toLowerCase();
+        if (!hay.includes(extra.sport.trim().toLowerCase())) return false;
+      }
+      if (extra.from && member.registeredAt && member.registeredAt.slice(0, 10) < extra.from) return false;
+      if (extra.to && member.registeredAt && member.registeredAt.slice(0, 10) > extra.to) return false;
       if (filter === 'all') return true;
+      if (filter === 'in' || filter === 'inside') return Boolean(member.hereNow);
       if (filter === 'expiring') {
         return member.membershipStatus === 'ACTIVE' && Boolean(member.expiresAt) && new Date(member.expiresAt!).getTime() <= soon;
+      }
+      if ([
+        'expired', 'expiring7', 'expiring14', 'expiring30', 'registered_recent', 'renewed_recent',
+        'upcoming_bookings', 'no_upcoming', 'with_trainer', 'no_trainer', 'wa_opted_in', 'wa_unknown', 'wa_opted_out', 'invalid_phone',
+      ].includes(filter)) {
+        return comms.memberMatchesFilter({
+          id: member.id,
+          membershipStatus: member.membershipStatus,
+          expiresAt: member.expiresAt,
+          registeredAt: member.registeredAt,
+          coachId: member.coachId,
+          mobile: member.mobile,
+          consentStatus: member.consentStatus,
+          hasUpcoming: member.hasUpcoming,
+        }, filter);
       }
       return member.membershipStatus === filter.toUpperCase();
     });
@@ -285,16 +353,16 @@ export function memberProfile(customerId: string) {
   const bookings = all(
     `SELECT b.id, b.sport, f.name AS facility, b.start_at, b.end_at, b.amount, b.payment_status, b.status, b.participants
      FROM bookings b JOIN facilities f ON f.id = b.facility_id
-     WHERE b.customer_id = ? ORDER BY b.start_at DESC LIMIT 40`,
+     WHERE b.customer_id = ? ORDER BY b.start_at DESC LIMIT 200`,
     [customerId],
   );
   const payments = all(
     `SELECT o.id, o.order_number, o.total, o.payment_status, o.created_at, o.notes
-     FROM orders o WHERE o.customer_id = ? AND o.status NOT IN ('DRAFT','OTP_PENDING') ORDER BY o.created_at DESC LIMIT 40`,
+     FROM orders o WHERE o.customer_id = ? AND o.status NOT IN ('DRAFT','OTP_PENDING') ORDER BY o.created_at DESC LIMIT 200`,
     [customerId],
   );
   const checkIns = all(
-    'SELECT id, facility_name, kind, fee, payment_status, checked_in_at, checked_out_at FROM check_ins WHERE customer_id = ? ORDER BY checked_in_at DESC LIMIT 40',
+    'SELECT id, facility_name, kind, fee, payment_status, checked_in_at, checked_out_at FROM check_ins WHERE customer_id = ? ORDER BY checked_in_at DESC LIMIT 500',
     [customerId],
   );
   const today = new Date().toISOString().slice(0, 10);
@@ -311,14 +379,25 @@ export function memberProfile(customerId: string) {
   const bookingMinutes = (bookings as { start_at: string; end_at: string; status: string }[])
     .filter((row) => row.status !== 'CANCELLED' && row.status !== 'NO_SHOW')
     .reduce((sum, row) => sum + Math.max(0, Math.round((new Date(row.end_at).getTime() - new Date(row.start_at).getTime()) / 60000)), 0);
-  return { member, bookings, payments, checkIns, upcoming, outstanding: dues, timeUsedMinutes: visitMinutes + bookingMinutes };
+  return {
+    member,
+    bookings,
+    payments,
+    checkIns,
+    upcoming,
+    outstanding: dues,
+    timeUsedMinutes: visitMinutes + bookingMinutes,
+    consent: comms.consentFor(customerId),
+    messages: comms.messageHistory(customerId),
+  };
 }
 
 function assignPlan(customerId: string, planId: string, actor: string, status = 'ACTIVE') {
   const plan = get<PlanRow>('SELECT * FROM membership_plans WHERE id = ? AND cafe_id = ?', [planId, CAFE_ID]);
   if (!plan || plan.is_active !== 1) throw new AppError(400, 'PLAN', 'Choose an active membership plan.');
-  const customer = get<{ id: string }>('SELECT id FROM customers WHERE id = ? AND cafe_id = ?', [customerId, CAFE_ID]);
+  const customer = get<{ id: string; member_code: string }>('SELECT id, member_code FROM customers WHERE id = ? AND cafe_id = ?', [customerId, CAFE_ID]);
   if (!customer) throw new AppError(404, 'MEMBER', 'Member not found.');
+  const prior = get<{ n: number }>('SELECT COUNT(*) AS n FROM memberships WHERE customer_id = ?', [customerId])?.n ?? 0;
   const starts = nowIso();
   const expires = new Date(Date.now() + plan.duration_days * 24 * 60 * 60 * 1000).toISOString();
   const id = randomUUID();
@@ -333,6 +412,18 @@ function assignPlan(customerId: string, planId: string, actor: string, status = 
     );
   });
   audit(actor, 'ASSIGN_PLAN', 'membership', id, plan.name);
+  if (status === 'ACTIVE') {
+    comms.emitGymEvent(prior > 0 ? 'MEMBERSHIP_RENEWED' : 'MEMBERSHIP_ACTIVATED', {
+      entity: 'membership',
+      entityId: id,
+      customerId,
+      extra: {
+        membership_id: customer.member_code || id.slice(0, 8),
+        expiry_date: comms.kolkataYmd(expires),
+        new_expiry_date: comms.kolkataYmd(expires),
+      },
+    });
+  }
   return memberProfile(customerId);
 }
 
@@ -356,8 +447,8 @@ export function saveMember(input: {
   const name = input.name.trim();
   if (name.length < 2) throw new AppError(400, 'NAME', 'Enter the member name.');
   const existing = input.id
-    ? get<{ id: string }>('SELECT id FROM customers WHERE id = ? AND cafe_id = ?', [input.id, CAFE_ID])
-    : get<{ id: string }>('SELECT id FROM customers WHERE cafe_id = ? AND mobile = ?', [CAFE_ID, mobile]);
+    ? get<{ id: string; coach_id: string | null }>('SELECT id, coach_id FROM customers WHERE id = ? AND cafe_id = ?', [input.id, CAFE_ID])
+    : get<{ id: string; coach_id: string | null }>('SELECT id, coach_id FROM customers WHERE cafe_id = ? AND mobile = ?', [CAFE_ID, mobile]);
   const id = existing?.id ?? randomUUID();
   const count = get<{ n: number }>('SELECT COUNT(*) AS n FROM customers WHERE cafe_id = ?', [CAFE_ID])?.n ?? 0;
   if (!existing) {
@@ -377,8 +468,179 @@ export function saveMember(input: {
   if (input.notes !== undefined) run('UPDATE customers SET notes = ? WHERE id = ?', [input.notes.slice(0, 2000), id]);
   if (input.notifyPrefs !== undefined) run('UPDATE customers SET notify_prefs = ? WHERE id = ?', [input.notifyPrefs.slice(0, 40), id]);
   audit(actor, existing ? 'EDIT_MEMBER' : 'ADD_MEMBER', 'member', id, name);
+  if (input.coachId && input.coachId !== (existing?.coach_id || '')) {
+    const trainer = get<{ name: string; specialization: string }>('SELECT name, specialization FROM trainers WHERE id = ?', [input.coachId]);
+    comms.emitGymEvent('TRAINER_ASSIGNED', {
+      entity: 'trainer',
+      entityId: input.coachId,
+      customerId: id,
+      extra: {
+        trainer_name: trainer?.name || 'Trainer',
+        sport: trainer?.specialization ? ` for ${trainer.specialization}` : '',
+      },
+    });
+  }
   if (input.planId) return assignPlan(id, input.planId, actor);
   return memberProfile(id);
+}
+
+const MEMBER_CSV_KEYS: Record<string, string[]> = {
+  name: ['name', 'fullname', 'member', 'membername'],
+  mobile: ['mobile', 'phone', 'phonenumber', 'contact', 'contactnumber', 'whatsapp'],
+  email: ['email', 'mail', 'emailaddress'],
+  plan: ['plan', 'membership', 'planname', 'membershipplan'],
+  activity: ['activity', 'access', 'sport', 'wantstouse', 'facility'],
+  trainer: ['trainer', 'coach'],
+  notes: ['notes', 'note'],
+  emergency: ['emergency', 'emergencycontact'],
+};
+
+function csvHeaderKey(value: string) {
+  return value.toLowerCase().replace(/[\s_\-/]+/g, '');
+}
+
+function parseCsvTable(text: string) {
+  const src = text.replace(/^\uFEFF/, '');
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') {
+          cell += '"';
+          i += 1;
+        } else quoted = false;
+      } else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') {
+      row.push(cell.trim());
+      cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && src[i + 1] === '\n') i += 1;
+      row.push(cell.trim());
+      cell = '';
+      if (row.some((value) => value)) rows.push(row);
+      row = [];
+    } else cell += ch;
+  }
+  row.push(cell.trim());
+  if (row.some((value) => value)) rows.push(row);
+  return rows;
+}
+
+function memberCsvColumns(header: string[]) {
+  const index = new Map<string, number>();
+  header.forEach((label, i) => {
+    const key = csvHeaderKey(label);
+    if (key && !index.has(key)) index.set(key, i);
+  });
+  const col = (aliases: string[]) => {
+    for (const alias of aliases) {
+      const i = index.get(alias);
+      if (i !== undefined) return i;
+    }
+    return -1;
+  };
+  const name = col(MEMBER_CSV_KEYS.name);
+  const mobile = col(MEMBER_CSV_KEYS.mobile);
+  if (name < 0 || mobile < 0) throw new AppError(400, 'CSV', 'The CSV needs name and mobile columns.');
+  return {
+    name,
+    mobile,
+    email: col(MEMBER_CSV_KEYS.email),
+    plan: col(MEMBER_CSV_KEYS.plan),
+    activity: col(MEMBER_CSV_KEYS.activity),
+    trainer: col(MEMBER_CSV_KEYS.trainer),
+    notes: col(MEMBER_CSV_KEYS.notes),
+    emergency: col(MEMBER_CSV_KEYS.emergency),
+  };
+}
+
+function csvCell(row: string[], index: number) {
+  return index < 0 ? '' : (row[index] ?? '').trim();
+}
+
+export type MemberCsvIssue = { row: number; name: string; reason: string };
+
+export function importMembersCsv(text: string, actor: string) {
+  const csv = text.trim();
+  if (!csv) throw new AppError(400, 'CSV', 'Choose a CSV file of members.');
+  if (csv.length > 1_400_000) throw new AppError(400, 'CSV', 'That CSV is too large.');
+  const table = parseCsvTable(csv);
+  if (table.length < 2) throw new AppError(400, 'CSV', 'The CSV has a header but no members.');
+  const columns = memberCsvColumns(table[0]);
+  const body = table.slice(1);
+  if (body.length > 2000) throw new AppError(400, 'CSV', 'Upload at most 2000 members at a time.');
+  const plans = listPlans(false);
+  const trainers = listTrainers().filter((trainer) => trainer.isActive);
+  const matchPlan = (value: string) => {
+    const needle = value.trim().toLowerCase();
+    if (!needle) return '';
+    return plans.find((plan) => plan.id.toLowerCase() === needle || plan.name.toLowerCase() === needle)?.id ?? null;
+  };
+  const matchTrainer = (value: string) => {
+    const needle = value.trim().toLowerCase();
+    if (!needle) return '';
+    return trainers.find((trainer) => trainer.name.toLowerCase() === needle || trainer.id.toLowerCase() === needle)?.id ?? null;
+  };
+  const seen = new Set<string>();
+  const created: string[] = [];
+  const skipped: MemberCsvIssue[] = [];
+  const errors: MemberCsvIssue[] = [];
+  body.forEach((row, offset) => {
+    const line = offset + 2;
+    const name = csvCell(row, columns.name);
+    const mobile = digits(csvCell(row, columns.mobile));
+    const label = name || mobile || `Row ${line}`;
+    if (!name || name.length < 2) {
+      errors.push({ row: line, name: label, reason: 'Enter the member name.' });
+      return;
+    }
+    if (!mobile) {
+      errors.push({ row: line, name: label, reason: 'Enter a valid 10-digit mobile number.' });
+      return;
+    }
+    if (seen.has(mobile)) {
+      skipped.push({ row: line, name: label, reason: 'Same mobile already appears in this file.' });
+      return;
+    }
+    seen.add(mobile);
+    const already = get<{ id: string }>('SELECT id FROM customers WHERE cafe_id = ? AND mobile = ?', [CAFE_ID, mobile]);
+    if (already) {
+      skipped.push({ row: line, name: label, reason: 'A member with this mobile is already on file.' });
+      return;
+    }
+    const planValue = csvCell(row, columns.plan);
+    const planId = matchPlan(planValue);
+    if (planId === null) {
+      errors.push({ row: line, name: label, reason: `Unknown plan "${planValue}".` });
+      return;
+    }
+    const trainerValue = csvCell(row, columns.trainer);
+    const coachId = matchTrainer(trainerValue);
+    if (coachId === null) {
+      errors.push({ row: line, name: label, reason: `Unknown trainer "${trainerValue}".` });
+      return;
+    }
+    const activityRaw = csvCell(row, columns.activity);
+    const accessInterest = matchActivity(activityRaw) || activityRaw;
+    const profile = saveMember({
+      name,
+      mobile,
+      email: csvCell(row, columns.email),
+      planId,
+      emergencyContact: csvCell(row, columns.emergency),
+      accessInterest,
+      coachId,
+      notes: csvCell(row, columns.notes),
+    }, actor);
+    created.push(profile.member.id);
+  });
+  audit(actor, 'IMPORT_MEMBERS', 'member', CAFE_ID, `${created.length} added from CSV`);
+  return { created: created.length, skipped: skipped.length, errors, skippedRows: skipped };
 }
 
 export function setMembershipStatus(customerId: string, status: 'ACTIVE' | 'SUSPENDED' | 'FROZEN' | 'PENDING', actor: string, freezeDays = 0) {
@@ -416,6 +678,17 @@ export function recordMemberPayment(customerId: string, planId: string, method: 
   run('UPDATE orders SET customer_id = ? WHERE id = ?', [customerId, order.id]);
   assignPlan(customerId, planId, actor);
   audit(actor, 'MEMBER_PAYMENT', 'order', order.id, method);
+  comms.emitGymEvent('PAYMENT_SUCCESS', {
+    entity: 'order',
+    entityId: order.id,
+    customerId,
+    extra: {
+      amount: `₹${plan.price}`,
+      transaction_id: order.id.slice(0, 8),
+      payment_date: comms.kolkataYmd(),
+      membership_ref: plan.name,
+    },
+  });
   return { order: paid, profile: memberProfile(customerId) };
 }
 
@@ -525,7 +798,24 @@ export function createBooking(input: {
   }
   audit(actor, 'CREATE_BOOKING', 'booking', id, facility.name);
   notify('staff', 'New booking', `${name} · ${facility.name}`);
-  return getBooking(id);
+  const created = getBooking(id);
+  if (customerId) {
+    comms.emitGymEvent('BOOKING_CONFIRMED', {
+      entity: 'booking',
+      entityId: id,
+      customerId,
+      extra: {
+        booking_id: id.slice(0, 8),
+        facility: facility.name,
+        sport: facility.sport,
+        booking_date: comms.kolkataYmd(created.startAt),
+        start_time: comms.kolkataTime(created.startAt),
+        end_time: comms.kolkataTime(created.endAt),
+        amount: `₹${created.amount}`,
+      },
+    });
+  }
+  return created;
 }
 
 export function listBookings(filters: { date?: string; facilityId?: string; sport?: string } = {}) {
@@ -627,7 +917,29 @@ export function updateBooking(id: string, patch: { startAt?: string; facilityId?
     );
   });
   audit(actor, patch.status && nextStatus !== current.status ? nextStatus : 'RESCHEDULE', 'booking', id, facility.name);
-  return getBooking(id);
+  const updated = getBooking(id);
+  if (updated.customerId) {
+    if (nextStatus === 'CANCELLED' && current.status !== 'CANCELLED') {
+      comms.emitGymEvent('BOOKING_CANCELLED', {
+        entity: 'booking',
+        entityId: id,
+        customerId: updated.customerId,
+        extra: { booking_id: id.slice(0, 8), facility: facility.name, refund_status: updated.paymentStatus === 'REFUNDED' ? 'Refunded' : 'No refund' },
+      });
+    } else if (startAt !== current.start_at || facilityId !== current.facility_id) {
+      comms.emitGymEvent('BOOKING_RESCHEDULED', {
+        entity: 'booking',
+        entityId: id,
+        customerId: updated.customerId,
+        extra: {
+          facility: facility.name,
+          old_when: `${comms.kolkataYmd(current.start_at)} ${comms.kolkataTime(current.start_at)}`,
+          new_when: `${comms.kolkataYmd(updated.startAt)} ${comms.kolkataTime(updated.startAt)}`,
+        },
+      });
+    }
+  }
+  return updated;
 }
 
 export function setBookingStatus(id: string, status: 'CONFIRMED' | 'CANCELLED' | 'CHECKED_IN' | 'COMPLETED' | 'NO_SHOW', actor: string) {
@@ -638,7 +950,16 @@ export function setBookingStatus(id: string, status: 'CONFIRMED' | 'CANCELLED' |
   }
   run('UPDATE bookings SET status = ?, updated_at = ? WHERE id = ?', [status, nowIso(), id]);
   audit(actor, status, 'booking', id, status);
-  return getBooking(id);
+  const updated = getBooking(id);
+  if (status === 'CANCELLED' && updated.customerId) {
+    comms.emitGymEvent('BOOKING_CANCELLED', {
+      entity: 'booking',
+      entityId: id,
+      customerId: updated.customerId,
+      extra: { booking_id: id.slice(0, 8), facility: updated.facility, refund_status: updated.paymentStatus === 'REFUNDED' ? 'Refunded' : 'No refund' },
+    });
+  }
+  return updated;
 }
 
 export function refundBooking(id: string, actor: string) {
@@ -661,8 +982,17 @@ export function refundBooking(id: string, actor: string) {
     run(`UPDATE bookings SET payment_status = 'REFUNDED', status = 'CANCELLED', updated_at = ? WHERE id = ?`, [nowIso(), id]);
   });
   audit(actor, 'REFUND', 'booking', id, 'Desk refund recorded. Razorpay is not refunded automatically.');
+  const booking = getBooking(id);
+  if (booking.customerId) {
+    comms.emitGymEvent('BOOKING_CANCELLED', {
+      entity: 'booking',
+      entityId: id,
+      customerId: booking.customerId,
+      extra: { booking_id: id.slice(0, 8), facility: booking.facility, refund_status: 'Desk refund recorded' },
+    });
+  }
   return {
-    booking: getBooking(id),
+    booking,
     note: 'Desk refund recorded. An online Razorpay refund is not sent unless that integration is configured.',
   };
 }
@@ -701,7 +1031,19 @@ export function saveFacility(input: Partial<FacilityRow> & { name?: string; spor
     );
   }
   audit(actor, current ? 'EDIT_FACILITY' : 'ADD_FACILITY', 'facility', facilityId, name);
+  const wasBlocked = Boolean(current && (current.maintenance_status !== 'OK' || current.is_available !== 1));
+  const nowBlocked = next.maintenance_status !== 'OK' || next.is_available !== 1;
+  if (current && !wasBlocked && nowBlocked) notifyFacilityMembers(facilityId, 'FACILITY_MAINTENANCE', { facility: name });
+  if (current && wasBlocked && !nowBlocked) notifyFacilityMembers(facilityId, 'FACILITY_REOPENED', { facility: name });
   return listFacilities().find((row) => row.id === facilityId);
+}
+
+function notifyFacilityMembers(facilityId: string, type: 'FACILITY_MAINTENANCE' | 'FACILITY_REOPENED', extra: Record<string, string>) {
+  const ids = all<{ customer_id: string }>(
+    `SELECT DISTINCT customer_id FROM bookings WHERE cafe_id = ? AND facility_id = ? AND status IN ('CONFIRMED','CHECKED_IN') AND start_at >= ? AND customer_id IS NOT NULL AND customer_id != ''`,
+    [CAFE_ID, facilityId, nowIso()],
+  ).map((row) => row.customer_id);
+  comms.emitToMembers(type, ids, extra, facilityId);
 }
 
 export function savePlan(input: {
@@ -752,7 +1094,7 @@ export function savePlan(input: {
   return listPlans().find((plan) => plan.id === id);
 }
 
-export function checkIn(input: { query: string; guestFee?: number; payFee?: boolean; method?: 'CASH' | 'UPI' | 'CARD' }, actor: string) {
+export function checkIn(input: { query: string; guestFee?: number; payFee?: boolean; method?: 'CASH' | 'UPI' | 'CARD'; facilityName?: string; fromGate?: boolean }, actor: string) {
   const q = input.query.trim();
   const mobile = digits(q);
   const member = get<{ id: string; name: string; mobile: string; membership_status: string; membership_expires_at: string | null }>(
@@ -768,31 +1110,24 @@ export function checkIn(input: { query: string; guestFee?: number; payFee?: bool
      WHERE b.customer_id = ? AND b.status IN ('CONFIRMED','CHECKED_IN')`,
     [member.id],
   ).find((row) => new Date(row.start_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) === today);
-  const needsBooking = !membership?.active;
-  if (needsBooking && !booking && !(input.guestFee && input.payFee && input.method)) {
-    throw new AppError(403, 'ACCESS', 'Membership is not active. Take a booking or collect an entry fee before check-in.');
+  const targetName = input.facilityName?.trim() || booking?.facility || 'Reception';
+  const open = get<{ id: string; facility_name: string }>(
+    'SELECT id, facility_name FROM check_ins WHERE cafe_id = ? AND customer_id = ? AND checked_out_at IS NULL ORDER BY checked_in_at DESC LIMIT 1',
+    [CAFE_ID, member.id],
+  );
+  if (!membership?.active) {
+    if (open) checkOut(open.id, actor);
+    throw new AppError(403, 'ACCESS', 'Only members can go in. This membership is not active.');
   }
-  let fee = 0;
-  let paymentStatus = 'UNPAID';
-  if (!membership?.active && input.payFee && input.method && input.guestFee && input.guestFee > 0) {
-    const pass = get('SELECT id FROM menu_items WHERE id = ?', ['gym_item_day_pass']);
-    if (!pass) throw new AppError(409, 'CATALOG', 'Day pass is not on the register.');
-    const order = createStaffOrder({
-      customerName: member.name,
-      customerMobile: member.mobile,
-      items: [{ menuItemId: 'gym_item_day_pass', quantity: 1, addonIds: [] }],
-      notes: 'CHECKIN',
-    });
-    markPaid(order.id, input.method, order.total);
-    run('UPDATE orders SET customer_id = ? WHERE id = ?', [member.id, order.id]);
-    fee = order.total;
-    paymentStatus = 'PAID';
+  if (open && matchArena(open.facility_name) && matchArena(open.facility_name) === matchArena(targetName)) {
+    return { checkInId: open.id, already: true, profile: memberProfile(member.id) };
   }
+  if (open) checkOut(open.id, actor);
   const id = randomUUID();
   run(
     `INSERT INTO check_ins (id, cafe_id, customer_id, member_name, booking_id, facility_name, kind, fee, payment_status, checked_in_at, checked_out_at, checked_in_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
-    [id, CAFE_ID, member.id, member.name, booking?.id ?? null, booking?.facility ?? 'Reception', membership?.active ? 'MEMBER' : 'VISITOR', fee, paymentStatus, nowIso(), actor],
+     VALUES (?, ?, ?, ?, ?, ?, 'MEMBER', 0, 'UNPAID', ?, NULL, ?)`,
+    [id, CAFE_ID, member.id, member.name, booking?.id ?? null, targetName, nowIso(), actor],
   );
   if (booking) run(`UPDATE bookings SET status = 'CHECKED_IN', updated_at = ? WHERE id = ?`, [nowIso(), booking.id]);
   audit(actor, 'CHECK_IN', 'check_in', id, member.name);
@@ -889,6 +1224,65 @@ export function facilityBoard() {
       }));
     return { ...facility, visitorCount: using.length, using };
   });
+}
+
+export function activityBoard() {
+  const customers = all<{ id: string; name: string; access_interest: string }>(
+    'SELECT id, name, access_interest FROM customers WHERE cafe_id = ?',
+    [CAFE_ID],
+  );
+  const joins = all<{ id: string; name: string; sport: string; customer_id: string | null }>(
+    "SELECT id, name, sport, customer_id FROM join_requests WHERE cafe_id = ? AND status NOT IN ('DECLINED','CANCELLED')",
+    [CAFE_ID],
+  );
+  const inside = all<{ customer_id: string | null; member_name: string; facility_name: string }>(
+    'SELECT customer_id, member_name, facility_name FROM check_ins WHERE cafe_id = ? AND checked_out_at IS NULL',
+    [CAFE_ID],
+  );
+  return ARENA_SPORTS.map((sport) => {
+    const courts = listFacilities().filter((facility) => matchArena(facility.sport) === sport || matchArena(facility.name) === sport);
+    const people = new Map<string, { id: string; name: string; inside: boolean }>();
+    for (const customer of customers) {
+      if (!listedArenas(customer.access_interest).includes(sport)) continue;
+      people.set(customer.id, { id: customer.id, name: customer.name, inside: false });
+    }
+    for (const row of joins) {
+      if (!listedArenas(row.sport).includes(sport)) continue;
+      const id = row.customer_id || `join:${row.id}`;
+      if (row.customer_id && people.has(row.customer_id)) continue;
+      if (!people.has(id)) people.set(id, { id, name: row.name, inside: false });
+    }
+    for (const row of inside) {
+      if (matchArena(row.facility_name) !== sport) continue;
+      const id = row.customer_id || `in:${row.member_name}`;
+      const current = (row.customer_id && people.get(row.customer_id)) || people.get(id) || [...people.values()].find((person) => person.name === row.member_name);
+      if (current) current.inside = true;
+      else people.set(id, { id, name: row.member_name, inside: true });
+    }
+    const list = [...people.values()].sort((left, right) => Number(right.inside) - Number(left.inside) || left.name.localeCompare(right.name));
+    return {
+      sport,
+      slug: arenaSlug(sport),
+      facilityId: courts[0]?.id ?? '',
+      inside: list.filter((person) => person.inside).length,
+      people: list,
+    };
+  });
+}
+
+export function scanActivityGate(slug: string, cookieHeader?: string, pass?: string | null) {
+  const sport = sportFromSlug(slug) || matchArena(slug);
+  if (!sport) throw new AppError(400, 'SPORT', 'Unknown activity.');
+  const customerId = readMemberId(cookieHeader, pass);
+  if (!customerId) throw new AppError(401, 'AUTH', 'Register once on this phone, then just scan.');
+  const member = get<{ id: string; name: string }>('SELECT id, name FROM customers WHERE id = ? AND cafe_id = ?', [customerId, CAFE_ID]);
+  if (!member) throw new AppError(401, 'AUTH', 'Register once on this phone, then just scan.');
+  if (!activeMembership(member.id)?.active) {
+    throw new AppError(403, 'ACCESS', 'Only members can go in. This membership is not active.');
+  }
+  const court = listFacilities().find((facility) => matchArena(facility.sport) === sport || matchArena(facility.name) === sport);
+  const result = checkIn({ query: member.id, facilityName: court?.name ?? sport, fromGate: true }, member.name);
+  return { ok: true, already: Boolean(result.already), sport, name: member.name, facility: court?.name ?? sport };
 }
 
 function shiftStats(name: string, since: string, until: string | null) {
@@ -1041,6 +1435,103 @@ function seedOnce(key: string, fn: () => void) {
   tx(() => {
     if (Number(run('INSERT OR IGNORE INTO seed_marks (id, created_at) VALUES (?, ?)', [key, nowIso()]).changes) > 0) fn();
   });
+}
+
+function seedDemoPeople() {
+  const first = ['Aarav', 'Anish', 'Diya', 'Ishaan', 'Kavya', 'Rohan', 'Sana', 'Vihaan', 'Anaya', 'Dev', 'Meher', 'Kabir', 'Zara', 'Yash', 'Pia', 'Arjun', 'Nisha', 'Reyansh', 'Tara', 'Om', 'Aisha', 'Vivaan', 'Kiara', 'Siddharth', 'Myra'];
+  const last = ['Sharma', 'Patel', 'Nair', 'Khan', 'Iyer', 'Reddy', 'Mehta', 'Singh', 'Joshi', 'Kapoor', 'Desai', 'Banerjee', 'Malhotra', 'Pillai', 'Chowdhury', 'Bose', 'Gill', 'Kulkarni', 'Menon', 'Das'];
+  const cities = ['Ahmedabad', 'Bengaluru', 'Chennai', 'Delhi', 'Hyderabad', 'Jaipur', 'Kolkata', 'Mumbai', 'Pune', 'Surat'];
+  const sports = [...SIGNUP_ACTIVITIES];
+  const planIds = ['plan_monthly', 'plan_quarterly', 'plan_annual', 'plan_student', 'plan_family', 'plan_premium'] as const;
+  const courts: Record<string, string> = {
+    Badminton: 'Badminton Court 1',
+    Basketball: 'Basketball C1',
+    Football: 'Football C1',
+    Swimming: 'Swimming C1',
+    Gym: 'Gym',
+    Tennis: 'Tennis Court 1',
+    Skating: 'Skating Rink',
+    'Table tennis': 'Table Tennis 1',
+  };
+  const coaches: Record<string, string> = {
+    Badminton: 'trainer_head',
+    Tennis: 'trainer_arjun',
+    Swimming: 'trainer_farah',
+    Football: 'trainer_imran',
+  };
+  const ids = ['Aadhaar', 'Passport', 'Driving licence', 'PAN'];
+  const count = get<{ n: number }>('SELECT COUNT(*) AS n FROM customers WHERE cafe_id = ?', [CAFE_ID])?.n ?? 0;
+  for (let i = 0; i < 500; i++) {
+    const given = first[i % first.length];
+    const family = last[Math.floor(i / first.length) % last.length];
+    const name = `${given} ${family}`;
+    const id = `demo_mem_${String(i + 1).padStart(3, '0')}`;
+    const mobile = String(9710000000 + i);
+    const primary = sports[i % sports.length];
+    const extra = sports[(i + 3) % sports.length];
+    const interest = i % 4 === 0 && extra !== primary ? `${primary} and ${extra}` : primary;
+    const bucket = i % 20;
+    const status = bucket === 0 ? 'EXPIRED' : bucket === 1 ? 'SUSPENDED' : bucket === 2 ? 'FROZEN' : 'ACTIVE';
+    const planId = planIds[i % planIds.length];
+    const days = status === 'EXPIRED' ? -(20 + (i % 80)) : bucket === 5 || bucket === 6 ? 3 + (i % 10) : 20 + (i % 300);
+    const expires = new Date(Date.now() + days * 86400000).toISOString();
+    const starts = new Date(Date.now() - 40 * 86400000).toISOString();
+    const coach = i % 3 === 0 ? (coaches[primary] ?? null) : null;
+    const created = new Date(Date.now() - (i % 280) * 86400000).toISOString();
+    const year = 1978 + (i % 30);
+    const month = String((i % 12) + 1).padStart(2, '0');
+    const day = String((i % 27) + 1).padStart(2, '0');
+    const city = cities[i % cities.length];
+    run(
+      `INSERT OR IGNORE INTO customers (id, cafe_id, name, mobile, order_count, last_order_at, created_at, email, member_code, membership_status, membership_expires_at, emergency_contact, photo_url, access_interest, govt_id_label, govt_id_url, coach_id, plan_id, frozen_until, notes, dob, city, tags)
+       VALUES (?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, '', ?, ?, '', ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        CAFE_ID,
+        name,
+        mobile,
+        created,
+        `${given.toLowerCase()}.${family.toLowerCase()}.${i + 1}@gymkhana.demo`,
+        memberCode(count + i + 1),
+        status,
+        expires,
+        String(9821000000 + (i % 9000)),
+        interest,
+        `${ids[i % ids.length]} · ending ${String(1000 + (i % 9000)).slice(-4)}`,
+        coach,
+        planId || null,
+        status === 'FROZEN' ? new Date(Date.now() + 14 * 86400000).toISOString() : null,
+        `${interest} · ${city} · ${status === 'ACTIVE' ? 'member evenings' : status.toLowerCase()}`,
+        `${year}-${month}-${day}`,
+        city,
+        [primary, planId, status.toLowerCase()].join(','),
+      ],
+    );
+    run(
+      `INSERT OR IGNORE INTO memberships (id, cafe_id, customer_id, plan_id, status, starts_at, expires_at, frozen_until, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [`mem_${id}`, CAFE_ID, id, planId, status === 'EXPIRED' ? 'EXPIRED' : status === 'FROZEN' ? 'FROZEN' : status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE', starts, expires, status === 'FROZEN' ? new Date(Date.now() + 14 * 86400000).toISOString() : null, created],
+    );
+    const court = courts[primary];
+    if (court && i % 2 === 0) {
+      const visits = 1 + (i % 6);
+      for (let v = 0; v < visits; v++) {
+        const inAt = new Date(Date.now() - (v + 1) * (1 + (i % 5)) * 86400000 - (v * 3600000)).toISOString();
+        const outAt = new Date(new Date(inAt).getTime() + (45 + (i % 90)) * 60000).toISOString();
+        run(
+          `INSERT OR IGNORE INTO check_ins (id, cafe_id, customer_id, member_name, booking_id, facility_name, kind, fee, payment_status, checked_in_at, checked_out_at, checked_in_by)
+           VALUES (?, ?, ?, ?, NULL, ?, 'MEMBER', 0, 'UNPAID', ?, ?, 'seed')`,
+          [`in_${id}_${v}`, CAFE_ID, id, name, court, inAt, outAt],
+        );
+      }
+    }
+    if (court && status === 'ACTIVE' && i % 13 === 0) {
+      run(
+        `INSERT OR IGNORE INTO check_ins (id, cafe_id, customer_id, member_name, booking_id, facility_name, kind, fee, payment_status, checked_in_at, checked_out_at, checked_in_by)
+         VALUES (?, ?, ?, ?, NULL, ?, 'MEMBER', 0, 'UNPAID', ?, NULL, 'seed')`,
+        [`in_${id}_now`, CAFE_ID, id, name, court, new Date(Date.now() - (20 + (i % 80)) * 60000).toISOString()],
+      );
+    }
+  }
 }
 
 type TaskDetails = { category: string; priority: string; assignedTo: string; cost: number };
@@ -1265,7 +1756,7 @@ export function saveTrainer(input: {
   return trainerProfile(id);
 }
 
-export const ID_TYPES = ['Aadhaar', 'PAN', 'Passport', 'Driving licence', 'Voter ID'];
+export const ID_TYPES = [...GOVT_ID_TYPES];
 const JOIN_OPEN = ['NEW', 'CONTACTED'];
 
 type JoinRow = {
@@ -1527,28 +2018,27 @@ function cleanJoin(input: JoinInput, current?: JoinRow) {
 
   let govtIdLabel = text(input.govtIdLabel ?? '');
   if (input.govtIdType !== undefined || input.govtIdNumber !== undefined) {
-    const type = ID_TYPES.find((entry) => entry.toLowerCase() === text(input.govtIdType).toLowerCase());
-    if (!type) throw new AppError(400, 'GOVT_ID', 'Choose your government ID type.');
-    const number = text(input.govtIdNumber).replace(/[\s-]/g, '').toUpperCase();
-    if (!/^[A-Z0-9]{4,20}$/.test(number)) throw new AppError(400, 'GOVT_ID', 'Enter your government ID number.');
-    govtIdLabel = type === 'Aadhaar' ? `Aadhaar · ending ${number.slice(-4)}` : `${type} · ${number}`;
+    const parsed = normalizeGovtId(text(input.govtIdType), text(input.govtIdNumber));
+    if ('error' in parsed) throw new AppError(400, 'GOVT_ID', parsed.error || 'Enter a valid ID.');
+    govtIdLabel = parsed.label;
   }
   if (!govtIdLabel) govtIdLabel = current?.govt_id_label ?? '';
   let govtIdUrl = current?.govt_id_url ?? '';
   if (input.govtIdUrl !== undefined) {
     const url = text(input.govtIdUrl);
-    if (url && (!url.startsWith('data:image/') || url.length > 1_500_000)) throw new AppError(400, 'GOVT_ID', 'Upload the ID as a photo under 1 MB.');
+    if (url && (!url.startsWith('data:image/') || url.length > 1_500_000)) throw new AppError(400, 'GOVT_ID', 'Upload a photo of the ID, nothing else.');
     govtIdUrl = url;
   }
-  if (signup && !govtIdUrl) throw new AppError(400, 'GOVT_ID', 'Drop a photo of your government ID.');
+  if (signup && !govtIdUrl) throw new AppError(400, 'GOVT_ID', 'Upload a photo of your government ID.');
   if (!govtIdLabel) govtIdLabel = govtIdUrl ? 'Government ID photo' : '';
-  if (!govtIdLabel) throw new AppError(400, 'GOVT_ID', 'Enter your government ID.');
+  if (!govtIdLabel) throw new AppError(400, 'GOVT_ID', 'Upload a photo of your government ID.');
   let photoUrl = current?.photo_url ?? '';
   if (input.photoUrl !== undefined) {
     const url = text(input.photoUrl);
-    if (url && (!url.startsWith('data:image/') || url.length > 1_500_000)) throw new AppError(400, 'PHOTO', 'Upload the photograph as a photo under 1 MB.');
+    if (url && (!url.startsWith('data:image/') || url.length > 1_500_000)) throw new AppError(400, 'PHOTO', 'Upload a photograph of yourself.');
     photoUrl = url;
   }
+  if (signup && !photoUrl) throw new AppError(400, 'PHOTO', 'Upload a photograph of yourself.');
 
   const wantsTrainer = flag(input.wantsTrainer, current?.wants_trainer === 1);
   let trainerId = '';
@@ -1698,6 +2188,17 @@ function settleJoin(row: JoinRow, method: 'CASH' | 'UPI' | 'CARD', label: string
     [label, paymentId, order.id, customerId, nowIso(), row.id],
   );
   audit(actor, 'JOIN_PAID', 'join', row.id, `${label} · bill ${order.orderNumber ?? ''}`.trim());
+  comms.emitGymEvent('PAYMENT_SUCCESS', {
+    entity: 'order',
+    entityId: order.id,
+    customerId,
+    extra: {
+      amount: `₹${row.amount}`,
+      transaction_id: (paymentId || order.id).slice(0, 8),
+      payment_date: comms.kolkataYmd(),
+      membership_ref: row.plan_name ?? 'Membership',
+    },
+  });
   return customerId;
 }
 
@@ -1713,6 +2214,18 @@ export function confirmJoinPayment(id: string, razorpayOrderId: string, razorpay
   try {
     verifyRazorpayPayment(razorpayOrderId, razorpayPaymentId, signature);
   } catch (error) {
+    if (row.customer_id) {
+      comms.emitGymEvent('PAYMENT_FAILED', {
+        entity: 'join',
+        entityId: row.id,
+        customerId: row.customer_id,
+        extra: {
+          amount: `₹${row.amount}`,
+          transaction_id: razorpayPaymentId.slice(0, 8),
+          payment_date: comms.kolkataYmd(),
+        },
+      });
+    }
     if (error instanceof RazorpayError) throw new AppError(422, 'PAYMENTS', error.message);
     throw error;
   }
@@ -1769,7 +2282,34 @@ export function approveJoinRequest(id: string, method: string | undefined, actor
     run(`UPDATE join_requests SET status = 'APPROVED', customer_id = ?, handled_by = ?, notes = COALESCE(?, notes), updated_at = ? WHERE id = ?`, [customerId, actor, notes === undefined ? null : notes.slice(0, 2000), nowIso(), id]);
   });
   audit(actor, 'JOIN_APPROVED', 'join', id, `${row.plan_name ?? 'Plan'} is active`);
-  return getJoinRequest(id);
+  const approved = getJoinRequest(id);
+  if (row.trainer_id && approved.customerId) {
+    const trainer = get<{ name: string; specialization: string }>('SELECT name, specialization FROM trainers WHERE id = ?', [row.trainer_id]);
+    comms.emitGymEvent('TRAINER_ASSIGNED', {
+      entity: 'trainer',
+      entityId: row.trainer_id,
+      customerId: approved.customerId,
+      extra: {
+        trainer_name: trainer?.name || 'Trainer',
+        sport: trainer?.specialization ? ` for ${trainer.specialization}` : '',
+      },
+    });
+    if (row.preferred_slot) {
+      comms.emitGymEvent('SESSION_SCHEDULED', {
+        entity: 'session',
+        entityId: `${id}:${row.preferred_slot}`,
+        customerId: approved.customerId,
+        extra: {
+          trainer_name: trainer?.name || 'Trainer',
+          session_date: comms.kolkataYmd(),
+          start_time: slotLabel(row.preferred_slot),
+          location: row.sport,
+          session_ref: id.slice(0, 8),
+        },
+      });
+    }
+  }
+  return approved;
 }
 
 export function declineJoinRequest(id: string, reason: string, actor: string, notes?: string) {
@@ -1846,6 +2386,9 @@ export function seedGymkhana() {
     ['fac_gym', 'Gym', 'Fitness', 'Strength floor', 40, 0, 150, 'MEMBERSHIP'],
     ['fac_football', 'Football C1', 'Football', 'Field', 22, 2500, 4000, 'BOOKING'],
     ['fac_football_2', 'Football C2', 'Football', 'Field', 22, 2500, 4000, 'BOOKING'],
+    ['fac_skating', 'Skating Rink', 'Skating', 'Outdoor rink', 20, 300, 450, 'EITHER'],
+    ['fac_table_tennis', 'Table Tennis 1', 'Table tennis', 'Indoor hall', 8, 200, 350, 'BOOKING'],
+    ['fac_table_tennis_2', 'Table Tennis 2', 'Table tennis', 'Indoor hall', 8, 200, 350, 'BOOKING'],
   ] as const;
   for (const [id, name, sport, location, capacity, memberPrice, guestPrice, access] of facilities) {
     run(
@@ -1974,7 +2517,9 @@ export function seedGymkhana() {
       [id, CAFE_ID, name, mobile, nowIso(), email, code, access, govt, coach],
     );
   }
+  if (get("SELECT id FROM customers WHERE id = 'visitor_rahul' AND membership_status != 'ACTIVE'")) assignPlan('visitor_rahul', 'plan_monthly', 'seed');
   if (get("SELECT id FROM customers WHERE id = 'visitor_meera' AND membership_status != 'ACTIVE'")) assignPlan('visitor_meera', 'plan_monthly', 'seed');
+  if (get("SELECT id FROM customers WHERE id = 'visitor_kabir' AND membership_status != 'ACTIVE'")) assignPlan('visitor_kabir', 'plan_quarterly', 'seed');
   if (get("SELECT id FROM customers WHERE id = 'visitor_leela' AND membership_status != 'ACTIVE'")) assignPlan('visitor_leela', 'plan_student', 'seed');
   const day = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
   const evening = new Date(`${day}T18:00:00+05:30`).toISOString();
@@ -2172,6 +2717,51 @@ export function seedGymkhana() {
     });
   });
   seedClubDeskSales();
+  seedOnce('demo_people_500', seedDemoPeople);
+  repairMemberAccess();
+}
+
+function repairMemberAccess() {
+  const planIds = ['plan_monthly', 'plan_quarterly', 'plan_annual', 'plan_student', 'plan_family', 'plan_premium'] as const;
+  const pendingDemo = all<{ id: string }>(
+    `SELECT id FROM customers WHERE cafe_id = ? AND id LIKE 'demo_mem_%' AND (membership_status = 'PENDING' OR IFNULL(plan_id, '') = '')`,
+    [CAFE_ID],
+  );
+  pendingDemo.forEach((row, index) => {
+    const planId = planIds[index % planIds.length];
+    const plan = get<{ duration_days: number }>('SELECT duration_days FROM membership_plans WHERE id = ?', [planId]);
+    const expires = new Date(Date.now() + (plan?.duration_days ?? 30) * 86_400_000).toISOString();
+    const starts = nowIso();
+    run(
+      `UPDATE customers SET membership_status = 'ACTIVE', plan_id = ?, membership_expires_at = ?, frozen_until = NULL WHERE id = ?`,
+      [planId, expires, row.id],
+    );
+    run(
+      `INSERT OR IGNORE INTO memberships (id, cafe_id, customer_id, plan_id, status, starts_at, expires_at, frozen_until, created_at) VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, NULL, ?)`,
+      [`mem_${row.id}`, CAFE_ID, row.id, planId, starts, expires, starts],
+    );
+  });
+  const named: [string, string][] = [
+    ['visitor_rahul', 'plan_monthly'],
+    ['visitor_kabir', 'plan_quarterly'],
+    ['visitor_meera', 'plan_monthly'],
+    ['visitor_leela', 'plan_student'],
+    ['member_demo', 'plan_annual'],
+  ];
+  for (const [id, planId] of named) {
+    const row = get<{ membership_status: string }>('SELECT membership_status FROM customers WHERE id = ? AND cafe_id = ?', [id, CAFE_ID]);
+    if (row && row.membership_status !== 'ACTIVE') assignPlan(id, planId, 'seed');
+  }
+  const gate = get<{ id: string; membership_status: string }>("SELECT id, membership_status FROM customers WHERE cafe_id = ? AND name = 'Gate Scan'", [CAFE_ID]);
+  if (gate && gate.membership_status !== 'ACTIVE') assignPlan(gate.id, 'plan_monthly', 'seed');
+  const open = all<{ id: string; customer_id: string }>(
+    'SELECT id, customer_id FROM check_ins WHERE cafe_id = ? AND checked_out_at IS NULL AND customer_id IS NOT NULL',
+    [CAFE_ID],
+  );
+  for (const row of open) {
+    if (!activeMembership(row.customer_id)?.active) run('UPDATE check_ins SET checked_out_at = ? WHERE id = ?', [nowIso(), row.id]);
+  }
+  run(`UPDATE check_ins SET kind = 'MEMBER' WHERE cafe_id = ? AND kind != 'MEMBER'`, [CAFE_ID]);
 }
 
 function seedClubDeskSales() {
@@ -2271,6 +2861,16 @@ export function registerGymRoutes(
       res.status(403).json({ error: 'You do not have access to this.', code: 'FORBIDDEN' });
     });
   };
+  const allowAdmin = () => (req: Request, res: Response, next: NextFunction) => {
+    requireAuth(req, res, () => {
+      const role = req.user?.role ?? '';
+      if (role === 'staff' || role === 'SUPER_ADMIN' || role === 'MANAGER') {
+        next();
+        return;
+      }
+      res.status(403).json({ error: 'You do not have access to WhatsApp settings.', code: 'FORBIDDEN' });
+    });
+  };
   const actor = (req: Request): Actor => ({ id: req.user?.id ?? '', name: req.user?.name ?? 'Staff', role: req.user?.role ?? '' });
 
   app.get('/api/gym/overview', allow('RECEPTIONIST', 'CASHIER', 'COACH', 'FACILITY_MANAGER', 'INVENTORY_MANAGER'), wrap((_req, res) => {
@@ -2280,13 +2880,23 @@ export function registerGymRoutes(
     res.json(gymReport());
   }));
   app.get('/api/gym/members', allow('RECEPTIONIST', 'CASHIER', 'COACH', 'FACILITY_MANAGER'), wrap((req, res) => {
-    res.json({ members: listMembers(String(req.query.filter ?? 'all'), String(req.query.q ?? '')) });
+    res.json({
+      members: listMembers(String(req.query.filter ?? 'all'), String(req.query.q ?? ''), {
+        sport: String(req.query.sport ?? ''),
+        from: String(req.query.from ?? ''),
+        to: String(req.query.to ?? ''),
+      }),
+    });
   }));
   app.get('/api/gym/members/:id', allow('RECEPTIONIST', 'CASHIER', 'COACH', 'FACILITY_MANAGER'), wrap((req, res) => {
     res.json(memberProfile(String(req.params.id)));
   }));
   app.post('/api/gym/members', allow('RECEPTIONIST'), wrap((req, res) => {
     res.json(saveMember(req.body, actor(req).name));
+  }));
+  app.post('/api/gym/members/import', allow('RECEPTIONIST'), wrap((req, res) => {
+    const csv = typeof req.body?.csv === 'string' ? req.body.csv : '';
+    res.json(importMembersCsv(csv, actor(req).name));
   }));
   app.patch('/api/gym/members/:id', allow('RECEPTIONIST'), wrap((req, res) => {
     res.json(saveMember({ ...req.body, id: String(req.params.id) }, actor(req).name));
@@ -2308,6 +2918,9 @@ export function registerGymRoutes(
   app.get('/api/gym/facilities', allow('RECEPTIONIST', 'CASHIER', 'COACH', 'FACILITY_MANAGER'), wrap((_req, res) => {
     res.json({ facilities: facilityBoard() });
   }));
+  app.get('/api/gym/activities', allow('RECEPTIONIST', 'CASHIER', 'COACH', 'FACILITY_MANAGER'), wrap((_req, res) => {
+    res.json({ boards: activityBoard() });
+  }));
   app.post('/api/gym/facilities', allow('FACILITY_MANAGER'), wrap((req, res) => {
     res.json({ facility: saveFacility(req.body, actor(req).name) });
   }));
@@ -2323,6 +2936,8 @@ export function registerGymRoutes(
     );
     if (req.body?.block) {
       run(`UPDATE facilities SET is_available = 0, maintenance_status = 'MAINTENANCE', updated_at = ? WHERE id = ?`, [nowIso(), id]);
+      const fac = get<{ name: string }>('SELECT name FROM facilities WHERE id = ?', [id]);
+      notifyFacilityMembers(id, 'FACILITY_MAINTENANCE', { facility: fac?.name || title });
     }
     audit(actor(req).name, 'MAINTENANCE', 'facility', id, title);
     res.json({ facilities: listFacilities() });
@@ -2343,6 +2958,8 @@ export function registerGymRoutes(
     );
     if (req.body?.block) {
       run(`UPDATE facilities SET is_available = 0, maintenance_status = 'MAINTENANCE', updated_at = ? WHERE id = ?`, [nowIso(), facilityId]);
+      const fac = get<{ name: string }>('SELECT name FROM facilities WHERE id = ?', [facilityId]);
+      notifyFacilityMembers(facilityId, 'FACILITY_MAINTENANCE', { facility: fac?.name || title });
     }
     audit(who, 'MAINTENANCE', 'maintenance', id, title);
     res.json({ id });
@@ -2381,6 +2998,8 @@ export function registerGymRoutes(
     if (!row) throw new AppError(404, 'MAINTENANCE', 'Record not found.');
     run(`UPDATE maintenance_records SET status = 'CLOSED', ends_at = ? WHERE id = ?`, [nowIso(), String(req.params.id)]);
     run(`UPDATE facilities SET is_available = 1, maintenance_status = 'OK', updated_at = ? WHERE id = ?`, [nowIso(), row.facility_id]);
+    const fac = get<{ name: string }>('SELECT name FROM facilities WHERE id = ?', [row.facility_id]);
+    notifyFacilityMembers(row.facility_id, 'FACILITY_REOPENED', { facility: fac?.name || 'Facility' });
     audit(actor(req).name, 'TASK_DONE', 'maintenance', String(req.params.id), 'Marked done');
     res.json({ ok: true });
   }));
@@ -2671,8 +3290,9 @@ export function registerGymRoutes(
         res.json({ ok: true, pending: true });
         return;
       }
-      res.setHeader('Set-Cookie', memberCookie(customerId));
-      res.json({ ok: true, pending: false });
+      const memberToken = memberPass(customerId);
+      res.setHeader('Set-Cookie', memberCookie(customerId, memberToken));
+      res.json({ ok: true, pending: false, memberToken });
       return;
     }
     if (!exposeDevOtp()) {
@@ -2683,8 +3303,9 @@ export function registerGymRoutes(
       ? get<{ id: string }>('SELECT id FROM customers WHERE cafe_id = ? AND mobile = ?', [CAFE_ID, mobile])
       : undefined;
     if (!member) throw new AppError(404, 'MEMBER', 'No member uses that mobile.');
-    res.setHeader('Set-Cookie', memberCookie(member.id));
-    res.json({ ok: true, dev: true });
+    const memberToken = memberPass(member.id);
+    res.setHeader('Set-Cookie', memberCookie(member.id, memberToken));
+    res.json({ ok: true, dev: true, memberToken });
   }));
   app.post('/api/portal/logout', wrap((_req, res) => {
     const secure = isProduction() ? '; Secure' : '';
@@ -2700,6 +3321,14 @@ export function registerGymRoutes(
     );
     res.json(memberProfile(customerId));
   }));
+  app.post('/api/portal/gate', wrap((req, res) => {
+    const incoming = typeof req.body?.memberToken === 'string' ? req.body.memberToken : '';
+    const result = scanActivityGate(String(req.body?.activity ?? ''), req.headers.cookie, incoming);
+    const customerId = readMemberId(req.headers.cookie, incoming);
+    const memberToken = customerId ? memberPass(customerId) : '';
+    if (customerId) res.setHeader('Set-Cookie', memberCookie(customerId, memberToken));
+    res.json({ ...result, memberToken });
+  }));
   app.get('/api/portal/join', wrap((_req, res) => {
     res.json(joinOptions());
   }));
@@ -2712,7 +3341,16 @@ export function registerGymRoutes(
       if (password.length < 4 || password.length > 120) throw new AppError(400, 'PASSWORD', 'Enter a password of at least 4 characters.');
       body.passwordHash = await hashPassword(password);
     }
-    res.status(201).json({ request: createJoinRequest(body) });
+    const request = createJoinRequest(body);
+    const row = joinRow(request.id);
+    const customerId = ensureJoinCustomer(row, 'Website');
+    run('UPDATE join_requests SET customer_id = ?, updated_at = ? WHERE id = ?', [customerId, nowIso(), row.id]);
+    if (!isProduction() && req.body?.demo === true) {
+      assignPlan(customerId, 'plan_monthly', 'Demo');
+    }
+    const memberToken = memberPass(customerId);
+    res.setHeader('Set-Cookie', memberCookie(customerId, memberToken));
+    res.status(201).json({ request, memberToken });
   }));
   app.get('/api/portal/join/:id', wrap((req, res) => {
     res.json({ request: getPublicJoin(String(req.params.id)) });
@@ -2760,4 +3398,6 @@ export function registerGymRoutes(
     if (row.payment_status === 'PAID') throw new AppError(409, 'REFUND', 'Paid bookings are cancelled at the desk so the refund is recorded.');
     res.json({ booking: setBookingStatus(String(req.params.id), 'CANCELLED', 'member') });
   }));
+
+  comms.registerCommsRoutes(app, { allow, allowAdmin, wrap, actor });
 }

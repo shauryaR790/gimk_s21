@@ -1,13 +1,19 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type MouseEvent, type ReactNode } from 'react';
+import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
+import QRCode from 'qrcode';
 import { formatINR } from '../../../../shared/domain';
+import { ARENA_SLOTS, arenaSlug } from '../../../../shared/activities';
 import { priorityLabel } from '../../../../shared/maintenance';
 import { api } from '../../../lib/api';
+import { printActivityQr } from '../../../lib/printQr';
 import { useTitle } from '../../../lib/useTitle';
 import { pushToast } from '../../../components/Toast';
+import { getDeskMode } from '../staffSession';
+import { ChromePagerTools, type BackendChromeContext } from '../odoo/OdooBackendLayout';
 import { ChromeRecords, type BoardItem } from '../odoo/chrome';
 import { BOOKING_STAGES, BOOKING_STATUS, BookingStages, bookingStageClass, Dropdown, describeAction, whenText } from './record';
 import { JOIN_STATUS, joinPayment, type JoinRequest } from './forms';
+import { stashSelectedMembers } from './comms';
 
 type Member = {
   id: string;
@@ -22,6 +28,15 @@ type Member = {
   govtIdLabel?: string;
   coachName?: string;
   isMember?: boolean;
+  hereNow?: string;
+  hereSport?: string;
+  lastInAt?: string;
+  visits?: number;
+  tappedToday?: boolean;
+  consentStatus?: string;
+  lastWhatsAppAt?: string;
+  lastWhatsAppStatus?: string;
+  hasUpcoming?: boolean;
 };
 
 type Facility = {
@@ -117,6 +132,116 @@ function Head({ title, children }: { title: string; children?: ReactNode }) {
   );
 }
 
+const MEMBER_CSV_TEMPLATE = `name,mobile,email,plan,activity,trainer,notes
+Asha Menon,9811110001,asha@example.com,Monthly,Badminton,,
+Kabir Seth,9811110002,,Quarterly,Gym,,
+`;
+
+type MemberCsvIssue = { row: number; name: string; reason: string };
+type MemberCsvResult = { created: number; skipped: number; errors: MemberCsvIssue[]; skippedRows: MemberCsvIssue[] };
+
+function PeopleActions({
+  addLabel,
+  onAdd,
+  onImported,
+}: {
+  addLabel: string;
+  onAdd: () => void;
+  onImported: () => Promise<void>;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const chrome = useOutletContext<BackendChromeContext>();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<MemberCsvResult | null>(null);
+
+  function downloadTemplate() {
+    const blob = new Blob([MEMBER_CSV_TEMPLATE], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'gymkhana-members.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function takeFile(file?: File | null) {
+    if (!file) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const csv = await file.text();
+      const data = await api<MemberCsvResult>('/api/gym/members/import', { method: 'POST', body: JSON.stringify({ csv }) });
+      setResult(data);
+      setOpen(true);
+      if (data.created) {
+        pushToast(data.created === 1 ? '1 member added from CSV' : `${data.created} members added from CSV`);
+        await onImported();
+      } else if (!data.errors.length) {
+        pushToast('No new members in that file.');
+      }
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Could not read that CSV.', 'err');
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
+  return (
+    <>
+      <header className="o-track__hello gk-user-head">
+        <button type="button" className="gk-btn" aria-expanded={open} disabled={busy} onClick={() => setOpen((value) => !value)}>
+          {busy ? 'Uploading…' : 'Upload CSV'}
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,text/csv,text/plain"
+          hidden
+          onChange={(event: ChangeEvent<HTMLInputElement>) => void takeFile(event.target.files?.[0])}
+        />
+        <ChromePagerTools
+          search={chrome.search}
+          setSearch={chrome.setSearch}
+          pagerLabel={chrome.pagerLabel}
+          pager={chrome.pager}
+          view={chrome.view}
+          setView={chrome.setView}
+        />
+        <button type="button" className="gk-btn" onClick={onAdd}>{addLabel}</button>
+      </header>
+      {open ? (
+        <div className="gk-csv">
+          <p>Upload a CSV of members. Needed columns are <strong>name</strong> and <strong>mobile</strong>. Optional: email, plan, activity, trainer, notes.</p>
+          <div className="gk-csv__actions">
+            <button type="button" className="gk-btn" onClick={downloadTemplate}>Download template</button>
+            <button type="button" className="gk-btn" disabled={busy} onClick={() => fileRef.current?.click()}>Choose file</button>
+          </div>
+          {result ? (
+            <>
+              <p className="gk-csv__result">
+                Added {result.created}. Skipped {result.skipped} already on file.
+                {result.errors.length ? ` ${result.errors.length} row${result.errors.length === 1 ? '' : 's'} need a fix.` : ''}
+              </p>
+              {result.errors.length || result.skippedRows.length ? (
+                <ul className="gk-csv__errors">
+                  {result.errors.slice(0, 8).map((row) => (
+                    <li key={`err-${row.row}-${row.reason}`}>Row {row.row} · {row.name} — {row.reason}</li>
+                  ))}
+                  {result.skippedRows.slice(0, 4).map((row) => (
+                    <li key={`skip-${row.row}-${row.reason}`}>Row {row.row} · {row.name} — {row.reason}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function when(iso: string) {
   return new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' });
 }
@@ -153,76 +278,283 @@ async function act(work: () => Promise<unknown>, done: string, reload: () => Pro
   }
 }
 
+const MEMBER_WA_FILTERS = [
+  { value: '', label: 'This tab' },
+  { value: 'expired', label: 'Expired memberships' },
+  { value: 'expiring7', label: 'Expiring in 7 days' },
+  { value: 'expiring14', label: 'Expiring in 14 days' },
+  { value: 'expiring30', label: 'Expiring in 30 days' },
+  { value: 'registered_recent', label: 'Recently registered' },
+  { value: 'renewed_recent', label: 'Recently renewed' },
+  { value: 'upcoming_bookings', label: 'Upcoming bookings' },
+  { value: 'no_upcoming', label: 'No upcoming bookings' },
+  { value: 'with_trainer', label: 'Assigned to a trainer' },
+  { value: 'no_trainer', label: 'No trainer' },
+  { value: 'wa_opted_in', label: 'WhatsApp opted in' },
+  { value: 'wa_unknown', label: 'Unknown consent' },
+  { value: 'wa_opted_out', label: 'Opted out' },
+  { value: 'invalid_phone', label: 'Invalid phone' },
+];
+
+function waLabel(status?: string) {
+  if (status === 'OPT_IN') return 'Opted in';
+  if (status === 'OPT_OUT') return 'Opted out';
+  return 'Unknown';
+}
+
 export function MembersPage() {
   const navigate = useNavigate();
-  const [filter, setFilter] = useState('all');
-  const [q, setQ] = useState('');
-  const path = `/api/gym/members?filter=${encodeURIComponent(filter)}&q=${encodeURIComponent(q)}`;
-  const { data, error } = useLoad<{ members: Member[] }>(path);
-  const members = data?.members ?? [];
-  return (
-    <Shell title="Visitors" error={error}>
-      <Head title="Visitors">
-        <button type="button" className="gk-btn" onClick={() => navigate('/pos/backend/visitors/new')}>Add visitor</button>
-      </Head>
-      <div className="gk-toolbar">
-        <input className="gk-input" value={q} placeholder="Search name, phone, trainer, or ID" aria-label="Search visitors" onChange={(event) => setQ(event.target.value)} />
-        <Dropdown
-          label="Visitor filter"
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: 'all', label: 'Everyone' },
-            { value: 'ACTIVE', label: 'Members only' },
-            { value: 'PENDING', label: 'Visitors only' },
-            { value: 'EXPIRED', label: 'Expired' },
-            { value: 'SUSPENDED', label: 'Suspended' },
-            { value: 'FROZEN', label: 'Frozen' },
-          ]}
+  const [params] = useSearchParams();
+  const tab = params.get('tab') || 'all';
+  const [extraFilter, setExtraFilter] = useState('');
+  const [picked, setPicked] = useState<string[]>([]);
+  const [sport, setSport] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const tabFilter = tab === 'in' ? 'in' : tab === 'members' ? 'ACTIVE' : tab === 'expiring' ? 'expiring' : 'all';
+  const filter = extraFilter || tabFilter;
+  const query = new URLSearchParams({ filter });
+  if (sport) query.set('sport', sport);
+  if (from) query.set('from', from);
+  if (to) query.set('to', to);
+  const people = useLoad<{ members: Member[] }>(`/api/gym/members?${query.toString()}`);
+  const plansLoad = useLoad<{ plans: Plan[] }>('/api/gym/plans');
+  const facs = useLoad<{ facilities: Facility[] }>('/api/gym/facilities');
+  const members = people.data?.members ?? [];
+  const sports = Array.from(new Set((facs.data?.facilities ?? []).map((row) => row.sport).filter(Boolean))).sort();
+  const plans = plansLoad.data?.plans ?? [];
+  useEffect(() => {
+    if (tab === 'requests' || tab === 'plans') return;
+    const timer = window.setInterval(() => { void people.reload(); }, 8000);
+    return () => window.clearInterval(timer);
+  }, [tab, people.reload]);
+  if (tab === 'requests') {
+    return (
+      <Shell title="Active users">
+        <PeopleActions
+          addLabel="Add member"
+          onAdd={() => navigate('/pos/backend/people/new')}
+          onImported={people.reload}
         />
-      </div>
-      <ChromeRecords
-        items={members.map((member) => ({
-          id: member.id,
-          title: member.name,
-          subtitle: member.mobile,
-          meta: member.coachName || member.planName || (member.isMember ? 'Member' : 'Visitor'),
-          href: `/pos/backend/visitors/${member.id}`,
-        }))}
-        empty="No visitors yet — add one from this page"
-      >
-        {(page) => (
-          <table className="o-be-table gk-table">
-            <thead><tr><th>Name</th><th>Phone</th><th>Wants to use</th><th>Status</th><th>Trainer</th><th>Government ID</th></tr></thead>
-            <tbody>
-              {take(members, page).map((member) => (
-                <tr key={member.id} className="is-link" onClick={() => navigate(`/pos/backend/visitors/${member.id}`)}>
-                  <td><strong>{member.name}</strong><div className="gk-muted">{member.memberCode}</div></td>
-                  <td>{member.mobile}</td>
-                  <td>{member.accessInterest || '—'}</td>
-                  <td>{member.isMember ? member.planName || 'Member' : 'Visitor'}</td>
-                  <td>{member.coachName || '—'}</td>
-                  <td>{member.govtIdLabel || '—'}</td>
+        <JoinRequestsList route="STAFF" embedded />
+      </Shell>
+    );
+  }
+  const error = tab === 'plans' ? plansLoad.error : people.error;
+  return (
+    <Shell title="Active users" error={error}>
+      <PeopleActions
+        addLabel={tab === 'plans' ? 'Create plan' : 'Add member'}
+        onAdd={() => navigate(tab === 'plans' ? '/pos/backend/plans/new' : '/pos/backend/people/new')}
+        onImported={people.reload}
+      />
+      {tab !== 'plans' ? (
+        <div className="gk-comms-filters">
+          <Dropdown label="Audience" value={extraFilter} options={MEMBER_WA_FILTERS} onChange={(value) => { setExtraFilter(value); setPicked([]); }} />
+          <Dropdown label="Sport" value={sport} options={[{ value: '', label: 'Any sport' }, ...sports.map((row) => ({ value: row, label: row }))]} onChange={setSport} />
+          <label>Registered from <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+          <label>to <input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+          <button type="button" className="gk-btn gk-btn--sm" onClick={() => setPicked(members.filter((row) => row.consentStatus === 'OPT_IN').map((row) => row.id))}>Select eligible</button>
+          <button
+            type="button"
+            className="gk-btn gk-btn--sm"
+            disabled={!picked.length}
+            onClick={() => { stashSelectedMembers(picked); navigate('/pos/backend/communications/compose'); }}
+          >
+            Send WhatsApp
+          </button>
+        </div>
+      ) : null}
+      {tab === 'plans' ? (
+        <ChromeRecords
+          items={plans.map((plan) => ({
+            id: plan.id,
+            title: plan.name,
+            subtitle: `${plan.durationDays} days`,
+            meta: plan.isActive ? 'Active plan' : 'Off',
+            href: `/pos/backend/plans/${plan.id}`,
+          }))}
+          empty="No plans yet — create one from this page"
+        >
+          {(page) => (
+            <table className="o-be-table gk-table">
+              <thead><tr><th>Plan</th><th>Days</th><th>Price</th><th>Discount</th><th>Guest passes</th><th>Freeze</th><th>Access</th><th>Status</th><th /></tr></thead>
+              <tbody>
+                {take(plans, page).map((plan) => (
+                  <tr key={plan.id} className="is-link" onClick={() => navigate(`/pos/backend/plans/${plan.id}`)}>
+                    <td><strong>{plan.name}</strong><div className="gk-muted">{plan.description || '—'}</div></td>
+                    <td>{plan.durationDays}</td>
+                    <td>{formatINR(plan.price)}</td>
+                    <td>{plan.discountBps / 100}%</td>
+                    <td>{plan.guestPasses}</td>
+                    <td>{plan.freezeDays} days</td>
+                    <td>{plan.facilityAccess === 'ALL' ? 'All facilities' : plan.facilityAccess}</td>
+                    <td>{plan.isActive ? 'Active' : 'Off'}</td>
+                    <td className="gk-actions" onClick={stop}>
+                      <button
+                        type="button"
+                        className="gk-btn gk-btn--sm"
+                        onClick={() => void act(() => api(`/api/gym/plans/${plan.id}`, { method: 'PATCH', body: JSON.stringify({ ...plan, isActive: !plan.isActive }) }), plan.isActive ? 'Plan turned off' : 'Plan turned on', plansLoad.reload)}
+                      >
+                        {plan.isActive ? 'Turn off' : 'Turn on'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {!plans.length ? <tr><td colSpan={9} className="o-be-table__empty">No plans yet — create one from this page</td></tr> : null}
+              </tbody>
+            </table>
+          )}
+        </ChromeRecords>
+      ) : (
+        <ChromeRecords
+          items={members.map((member) => ({
+            id: member.id,
+            title: member.name,
+            subtitle: `${member.mobile} ${member.memberCode} ${member.govtIdLabel ?? ''} ${member.hereSport || member.hereNow || ''} ${member.consentStatus ?? ''}`,
+            meta: member.hereNow ? `In ${member.hereSport || member.hereNow}` : member.planName || member.membershipStatus,
+            href: `/pos/backend/people/${member.id}`,
+            when: member.lastInAt || undefined,
+          }))}
+          empty={tab === 'in' ? 'No one is in yet — they appear here after they scan the court QR' : 'No members yet — add one from this page'}
+        >
+          {(page) => (
+            <table className="o-be-table gk-table">
+              <thead>
+                <tr>
+                  <th />
+                  <th>Name</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>Member ID</th>
+                  <th>Plan</th>
+                  <th>Expires</th>
+                  <th>WhatsApp</th>
+                  <th>Last message</th>
+                  <th />
                 </tr>
-              ))}
-              {!members.length ? <tr><td colSpan={6} className="o-be-table__empty">No visitors yet — add one from this page</td></tr> : null}
-            </tbody>
-          </table>
-        )}
-      </ChromeRecords>
+              </thead>
+              <tbody>
+                {take(members, page).map((member) => (
+                  <tr key={member.id} className="is-link" onClick={() => navigate(`/pos/backend/people/${member.id}`)}>
+                    <td className="gk-actions" onClick={stop}>
+                      <input
+                        type="checkbox"
+                        checked={picked.includes(member.id)}
+                        aria-label={`Select ${member.name}`}
+                        onChange={() => setPicked((current) => current.includes(member.id) ? current.filter((id) => id !== member.id) : [...current, member.id])}
+                      />
+                    </td>
+                    <td>
+                      <strong>{member.name}</strong>
+                      <div className="gk-muted">{member.hereNow ? (member.hereSport || member.hereNow) : member.memberCode}{member.isMember ? ' · Member' : ''}</div>
+                    </td>
+                    <td>{member.mobile}</td>
+                    <td>{member.email || '—'}</td>
+                    <td>{member.memberCode || '—'}</td>
+                    <td>{member.planName || member.membershipStatus || '—'}</td>
+                    <td>{member.expiresAt ? member.expiresAt.slice(0, 10) : '—'}</td>
+                    <td>{waLabel(member.consentStatus)}</td>
+                    <td>{member.lastWhatsAppAt ? `${member.lastWhatsAppStatus || ''} · ${when(member.lastWhatsAppAt)}` : '—'}</td>
+                    <td className="gk-actions" onClick={stop}>
+                      <button type="button" className="gk-btn gk-btn--sm" onClick={() => navigate(`/pos/backend/people/${member.id}`)}>Profile</button>
+                      <button type="button" className="gk-btn gk-btn--sm" onClick={() => { stashSelectedMembers([member.id]); navigate('/pos/backend/communications/compose'); }}>WhatsApp</button>
+                    </td>
+                  </tr>
+                ))}
+                {!members.length ? (
+                  <tr>
+                    <td colSpan={10} className="o-be-table__empty">
+                      {tab === 'in' ? 'No one is in yet — they appear here after they scan the court QR' : 'No members yet — add one from this page'}
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          )}
+        </ChromeRecords>
+      )}
     </Shell>
   );
+}
+
+type ArenaPerson = { id: string; name: string; inside: boolean };
+type ArenaBoard = { sport: string; slug: string; facilityId: string; inside: number; people: ArenaPerson[] };
+
+function arenaPeople(people: ArenaPerson[]) {
+  return [...people].sort((left, right) => Number(right.inside) - Number(left.inside) || left.name.localeCompare(right.name));
 }
 
 export function FacilitiesPage() {
   const navigate = useNavigate();
   const { data, error, reload } = useLoad<{ facilities: Facility[] }>('/api/gym/facilities');
+  const boardLoad = useLoad<{ boards: ArenaBoard[] }>('/api/gym/activities');
+  const [codes, setCodes] = useState<Record<string, string>>({});
   const facilities = data?.facilities ?? [];
+  const boards = boardLoad.data?.boards ?? [];
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void reload();
+      void boardLoad.reload();
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [reload, boardLoad.reload]);
+  useEffect(() => {
+    const origin = window.location.origin;
+    for (const board of boardLoad.data?.boards ?? []) {
+      void QRCode.toDataURL(`${origin}/in/${board.slug}`, { margin: 0, width: 108 }).then((url) => {
+        setCodes((current) => (current[board.slug] === url ? current : { ...current, [board.slug]: url }));
+      });
+    }
+  }, [boardLoad.data]);
   return (
-    <Shell title="Facilities" error={error}>
-      <Head title="Facilities">
+    <Shell title="Activities" error={error || boardLoad.error}>
+      <Head title="Activities">
         <button type="button" className="gk-btn" onClick={() => navigate('/pos/backend/facilities/new')}>Add facility</button>
       </Head>
+      <div className="gk-arenas">
+        {boards.map((board) => {
+          const people = arenaPeople(board.people);
+          return (
+          <article key={board.sport} className="gk-arena">
+            <header className="gk-arena__head">
+              <div>
+                <h3>{board.sport}</h3>
+                <p>{board.inside} in · {board.people.length} registered</p>
+              </div>
+              <div className="gk-arena__qr">
+                {codes[board.slug] ? <img src={codes[board.slug]} alt={`Scan with camera to enter ${board.sport}`} width={72} height={72} /> : <span className="gk-arena__qr-slot" />}
+                <em>Camera</em>
+                <button type="button" className="gk-btn gk-btn--sm" onClick={() => void printActivityQr(board.sport, board.slug)}>Print</button>
+              </div>
+            </header>
+            <button
+              type="button"
+              className={`gk-arena__field is-${arenaSlug(board.sport)}`}
+              aria-label={`${board.sport} court`}
+              onClick={() => board.facilityId && navigate(`/pos/backend/facilities/${board.facilityId}`)}
+            >
+              <span className="gk-arena__paint" />
+              <span className="gk-arena__mark" />
+              <span className="gk-arena__gear" />
+            </button>
+            <div className="gk-arena__people" aria-label={`${board.inside} in, ${board.people.length} registered on ${board.sport}`}>
+              {Array.from({ length: ARENA_SLOTS }, (_, slot) => {
+                const person = people[slot];
+                if (!person) return <span key={`open-${board.sport}-${slot}`} className="gk-dot" title="Open" />;
+                return (
+                  <span
+                    key={person.id}
+                    className={`gk-dot${person.inside ? ' is-in' : ''}`}
+                    title={`${person.name}${person.inside ? ' · in' : ''}`}
+                  />
+                );
+              })}
+            </div>
+          </article>
+          );
+        })}
+      </div>
       <ChromeRecords
         items={facilities.map((facility) => ({
           id: facility.id,
@@ -469,7 +801,7 @@ export function CheckInPage() {
       const member = members.members[0];
       if (!member) {
         setProfile(null);
-        setMessage('No visitor matched.');
+        setMessage('No member matched.');
         return;
       }
       setProfile(await api(`/api/gym/members/${member.id}`));
@@ -477,11 +809,11 @@ export function CheckInPage() {
       setMessage(err instanceof Error ? err.message : 'Search failed');
     }
   }
-  async function enter(payFee = false) {
+  async function enter() {
     if (!profile) return;
     try {
-      await api('/api/gym/checkins', { method: 'POST', body: JSON.stringify({ query: profile.member.id, payFee, method: 'CASH', guestFee: 200 }) });
-      setMessage(payFee ? 'Checked in and day-pass payment recorded.' : 'Checked in.');
+      await api('/api/gym/checkins', { method: 'POST', body: JSON.stringify({ query: profile.member.id }) });
+      setMessage('Checked in.');
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Check-in refused');
@@ -492,7 +824,7 @@ export function CheckInPage() {
     <Shell title="Check-in" error={error}>
       <Head title="Check-in" />
       <form className="gk-toolbar" onSubmit={(event) => void find(event)}>
-        <input className="gk-input" value={query} placeholder="Name, phone, or GK1001" aria-label="Find a visitor" onChange={(event) => setQuery(event.target.value)} />
+        <input className="gk-input" value={query} placeholder="Name, phone, or GK1001" aria-label="Find a member" onChange={(event) => setQuery(event.target.value)} />
         <button type="submit" className="gk-btn">Find</button>
       </form>
       {message ? <p className="gk-note">{message}</p> : null}
@@ -501,10 +833,13 @@ export function CheckInPage() {
           <h3>{profile.member.name}</h3>
           <p>{profile.member.memberCode} · {profile.member.membershipStatus} · expires {profile.member.expiresAt?.slice(0, 10) ?? '—'}</p>
           <p>Outstanding {formatINR(profile.outstanding)} · {profile.upcoming[0] ? `${profile.upcoming[0].facility} ${when(profile.upcoming[0].start_at)}` : 'No booking today'}</p>
-          <div className="gk-head-actions">
-            <button type="button" className="gk-btn" onClick={() => void enter(false)}>Check in</button>
-            <button type="button" className="gk-btn" onClick={() => void enter(true)}>Collect entry fee</button>
-          </div>
+          {profile.member.isMember ? (
+            <div className="gk-head-actions">
+              <button type="button" className="gk-btn" onClick={() => void enter()}>Check in</button>
+            </div>
+          ) : (
+            <p className="gk-note">Only members can go in. This membership is not active.</p>
+          )}
         </article>
       ) : null}
       <ChromeRecords
@@ -515,7 +850,7 @@ export function CheckInPage() {
           meta: row.kind,
           when: row.checked_in_at,
         }))}
-        empty="No one is checked in — find a visitor above"
+        empty="No one is checked in — find a member above"
       >
         {(page) => (
           <table className="o-be-table gk-table">
@@ -532,7 +867,7 @@ export function CheckInPage() {
                   </td>
                 </tr>
               ))}
-              {!rows.length ? <tr><td colSpan={5} className="o-be-table__empty">No one is checked in — find a visitor above</td></tr> : null}
+              {!rows.length ? <tr><td colSpan={5} className="o-be-table__empty">No one is checked in — find a member above</td></tr> : null}
             </tbody>
           </table>
         )}
@@ -890,18 +1225,23 @@ type ShiftRow = {
 
 export function ShiftPage() {
   const navigate = useNavigate();
+  const desk = getDeskMode();
   const { data, error, reload } = useLoad<{ shifts: ShiftRow[] }>('/api/gym/shifts');
   const [, setTick] = useState(0);
   useEffect(() => {
     const timer = window.setInterval(() => setTick((value) => value + 1), 30000);
     return () => window.clearInterval(timer);
   }, []);
-  const open = (data?.shifts ?? []).filter((row) => !row.endedAt);
-  const closed = (data?.shifts ?? []).filter((row) => row.endedAt);
+  const kind = desk === 'trainer' ? 'TRAINER' : desk === 'employee' ? 'STAFF' : null;
+  const rows = (data?.shifts ?? []).filter((row) => !kind || row.type === kind);
+  const open = rows.filter((row) => !row.endedAt);
+  const closed = rows.filter((row) => row.endedAt);
+  const startTo = desk === 'trainer' ? '/pos/backend/shift/new?role=trainer' : '/pos/backend/shift/new';
+  const title = desk === 'trainer' ? 'My shift' : 'Shift';
   return (
-    <Shell title="Shift" error={error}>
-      <Head title="Shift">
-        <button type="button" className="gk-btn" onClick={() => navigate('/pos/backend/shift/new')}>Start my shift</button>
+    <Shell title={title} error={error}>
+      <Head title={title}>
+        <button type="button" className="gk-btn" onClick={() => navigate(startTo)}>Start my shift</button>
       </Head>
       <ChromeRecords
         items={[...open, ...closed].map((row) => ({
@@ -1071,7 +1411,7 @@ export function SessionsPage() {
   );
 }
 
-function JoinRequestsList({ route }: { route: 'TRAINER' | 'STAFF' }) {
+function JoinRequestsList({ route, embedded = false }: { route: 'TRAINER' | 'STAFF'; embedded?: boolean }) {
   const navigate = useNavigate();
   const title = route === 'TRAINER' ? 'Trainer requests' : 'Membership requests';
   const base = route === 'TRAINER' ? '/pos/backend/trainer-requests' : '/pos/backend/membership-requests';
@@ -1100,9 +1440,9 @@ function JoinRequestsList({ route }: { route: 'TRAINER' | 'STAFF' }) {
   const count = (value: string) => requests.filter((row) => row.status === value).length;
   const paidWaiting = requests.filter((row) => row.paymentStatus === 'PAID' && (row.status === 'NEW' || row.status === 'CONTACTED')).length;
   const columns = route === 'TRAINER' ? 9 : 8;
-  return (
-    <Shell title={title} error={error}>
-      <Head title={title} />
+  const body = (
+    <>
+      {embedded && error ? <p className="o-track__error">{error}</p> : null}
       <section className="o-track__status">
         <article className="o-track__stat o-track__stat--plain"><span>New</span><strong>{count('NEW')}</strong><em>Waiting for a call</em></article>
         <article className="o-track__stat o-track__stat--plain"><span>Contacted</span><strong>{count('CONTACTED')}</strong><em>Called, not decided</em></article>
@@ -1191,6 +1531,13 @@ function JoinRequestsList({ route }: { route: 'TRAINER' | 'STAFF' }) {
       </table>
         )}
       </ChromeRecords>
+    </>
+  );
+  if (embedded) return body;
+  return (
+    <Shell title={title} error={error}>
+      <Head title={title} />
+      {body}
     </Shell>
   );
 }

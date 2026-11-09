@@ -620,6 +620,133 @@ CREATE TABLE IF NOT EXISTS seed_marks (
   addColumn(database, 'desk_shifts', 'areas', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'desk_shifts', 'notes', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'desk_shifts', 'opened_by', "TEXT NOT NULL DEFAULT ''");
+  database.exec(`
+CREATE TABLE IF NOT EXISTS whatsapp_settings (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL UNIQUE,
+  phone_number_id TEXT NOT NULL DEFAULT '',
+  waba_id TEXT NOT NULL DEFAULT '',
+  graph_version TEXT NOT NULL DEFAULT 'v21.0',
+  webhook_verify_token TEXT NOT NULL DEFAULT '',
+  test_number TEXT NOT NULL DEFAULT '',
+  unit_cost_paise INTEGER NOT NULL DEFAULT 0,
+  booking_reminder_hours INTEGER NOT NULL DEFAULT 24,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS communication_consent (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL,
+  customer_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'UNKNOWN',
+  marketing_status TEXT NOT NULL DEFAULT 'UNKNOWN',
+  source TEXT NOT NULL DEFAULT '',
+  wording TEXT NOT NULL DEFAULT '',
+  consented_at TEXT,
+  revoked_at TEXT,
+  updated_at TEXT NOT NULL,
+  UNIQUE(cafe_id, customer_id)
+);
+CREATE INDEX IF NOT EXISTS idx_comm_consent_customer ON communication_consent(customer_id);
+CREATE TABLE IF NOT EXISTS whatsapp_templates (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  meta_name TEXT NOT NULL,
+  language TEXT NOT NULL DEFAULT 'en',
+  category TEXT NOT NULL DEFAULT 'UTILITY',
+  status TEXT NOT NULL DEFAULT 'NOT_SYNCED',
+  body TEXT NOT NULL DEFAULT '',
+  variables_json TEXT NOT NULL DEFAULT '[]',
+  synced_at TEXT,
+  UNIQUE(cafe_id, key, language)
+);
+CREATE TABLE IF NOT EXISTS notification_events (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  entity TEXT NOT NULL DEFAULT '',
+  entity_id TEXT NOT NULL DEFAULT '',
+  customer_id TEXT NOT NULL DEFAULT '',
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notification_events_type ON notification_events(cafe_id, type, created_at);
+CREATE TABLE IF NOT EXISTS whatsapp_campaigns (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  template_key TEXT NOT NULL,
+  category TEXT NOT NULL,
+  language TEXT NOT NULL DEFAULT 'en',
+  audience TEXT NOT NULL DEFAULT '',
+  actor TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'QUEUED',
+  recipient_count INTEGER NOT NULL DEFAULT 0,
+  excluded_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  cancelled_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_wa_campaigns_created ON whatsapp_campaigns(cafe_id, created_at);
+CREATE TABLE IF NOT EXISTS notification_queue (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL,
+  campaign_id TEXT,
+  customer_id TEXT NOT NULL DEFAULT '',
+  to_mobile TEXT NOT NULL,
+  template_key TEXT NOT NULL,
+  language TEXT NOT NULL DEFAULT 'en',
+  category TEXT NOT NULL,
+  variables_json TEXT NOT NULL DEFAULT '[]',
+  dedupe_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'QUEUED',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT NOT NULL,
+  last_error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  UNIQUE(cafe_id, dedupe_key)
+);
+CREATE INDEX IF NOT EXISTS idx_wa_queue_next ON notification_queue(status, next_attempt_at);
+CREATE TABLE IF NOT EXISTS whatsapp_messages (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL,
+  campaign_id TEXT,
+  queue_id TEXT,
+  customer_id TEXT NOT NULL DEFAULT '',
+  to_mobile TEXT NOT NULL,
+  template_key TEXT NOT NULL,
+  category TEXT NOT NULL,
+  language TEXT NOT NULL DEFAULT 'en',
+  wa_message_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'QUEUED',
+  error_code TEXT NOT NULL DEFAULT '',
+  error_message TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wa_messages_wa_id ON whatsapp_messages(wa_message_id);
+CREATE INDEX IF NOT EXISTS idx_wa_messages_customer ON whatsapp_messages(customer_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_wa_messages_status ON whatsapp_messages(cafe_id, status, created_at);
+CREATE TABLE IF NOT EXISTS whatsapp_recipients (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL,
+  customer_id TEXT NOT NULL DEFAULT '',
+  mobile TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'QUEUED',
+  excluded_reason TEXT NOT NULL DEFAULT '',
+  message_id TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wa_recipients_campaign ON whatsapp_recipients(campaign_id);
+CREATE TABLE IF NOT EXISTS whatsapp_webhook_events (
+  id TEXT PRIMARY KEY,
+  cafe_id TEXT NOT NULL,
+  wa_message_id TEXT NOT NULL DEFAULT '',
+  payload_json TEXT NOT NULL,
+  received_at TEXT NOT NULL
+);
+`);
   const userVersion = (database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
   if (userVersion < 2) {
     database.exec('UPDATE orders SET customer_id = NULL');

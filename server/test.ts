@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { applyLineQuantity, buildSalesReport, canTransition, cartLineKey, clampLineQuantity, dueTotal, formatZonedYmd, maskMobile, nextTicketStatus, noteValue, orderChannel, orderFlag, priceCart, registerPath, resolveMenuShortcut, shiftYmd, splitAmounts, tableVisualState, zonedDayStart, type AddonGroup, type MenuItem } from '../shared/domain';
+import { fillTemplate } from '../shared/comms';
 
 process.env.DB_PATH = ':memory:';
 process.env.NODE_ENV = 'test';
@@ -512,6 +513,15 @@ const { run: runSql } = await import('./db');
 const joinBase = { email: 'join@example.com', dob: '1995-04-12', govtIdType: 'Aadhaar', govtIdNumber: '1234 5678 9012' };
 const joinOptions = gym.joinOptions();
 assert.ok(joinOptions.sports.some((row) => row.sport === 'Badminton'));
+assert.deepEqual(
+  gym.activityBoard().map((row) => row.sport),
+  ['Badminton', 'Basketball', 'Football', 'Gym', 'Skating', 'Swimming', 'Tennis', 'Table tennis'],
+);
+const { matchArena, sportFromSlug } = await import('../shared/activities');
+assert.equal(matchArena('Table Tennis 1'), 'Table tennis');
+assert.equal(matchArena('Tennis Court 1'), 'Tennis');
+assert.equal(sportFromSlug('skating'), 'Skating');
+assert.equal(sportFromSlug('table-tennis'), 'Table tennis');
 assert.ok(joinOptions.trainers.find((row) => row.id === 'trainer_head')?.freeSlots.includes('Mon 07:00'));
 assert.throws(() => gym.createJoinRequest({ ...joinBase, sport: 'Badminton', name: 'No Plan', mobile: '9876543209' }), /membership plan/);
 assert.throws(() => gym.createJoinRequest({ ...joinBase, dob: '2099-01-01', sport: 'Badminton', name: 'Future', mobile: '9876543209', planId: 'plan_monthly' }), /date of birth/);
@@ -561,6 +571,15 @@ testEnv.razorpayKeyId = '';
 testEnv.razorpayKeySecret = '';
 
 const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+assert.throws(() => gym.createJoinRequest({
+  signup: true,
+  firstName: 'No',
+  lastName: 'Id',
+  email: 'noid@gymkhana.local',
+  pincode: '400001',
+  sport: 'Gym',
+  photoUrl: pixel,
+}), /government ID/);
 const signup = gym.createJoinRequest({
   signup: true,
   firstName: 'Nikita',
@@ -568,6 +587,7 @@ const signup = gym.createJoinRequest({
   email: 'nikita@gymkhana.local',
   pincode: '400001',
   sport: 'Skating',
+  photoUrl: pixel,
   govtIdUrl: pixel,
   wantsTrainer: true,
   becomeMember: true,
@@ -594,10 +614,94 @@ const deskSignup = gym.createJoinRequest({
   email: 'oksana@gymkhana.local',
   pincode: '110001',
   sport: 'Gym',
+  photoUrl: pixel,
   govtIdUrl: pixel,
   wantsTrainer: false,
   isMember: true,
 });
 assert.equal(gym.getJoinRequest(deskSignup.id).route, 'STAFF');
+
+const pendingGate = gym.saveMember({ name: 'No Plan Yet', mobile: '9876500888' }, 'test');
+assert.equal(pendingGate.member.membershipStatus, 'PENDING');
+assert.throws(() => gym.checkIn({ query: pendingGate.member.id, facilityName: 'Gym' }, 'test'), /Only members can go in/);
+assert.throws(() => gym.checkIn({ query: pendingGate.member.id, facilityName: 'Gym', fromGate: true }, 'test'), /Only members can go in/);
+assert.throws(() => gym.checkIn({ query: pendingGate.member.id, facilityName: 'Gym', payFee: true, method: 'CASH', guestFee: 200 }, 'test'), /Only members can go in/);
+const memberIn = gym.checkIn({ query: deskApproved.customerId, facilityName: 'Badminton Court 1' }, 'test');
+assert.ok(memberIn.checkInId);
+assert.equal(memberIn.profile.member.membershipStatus, 'ACTIVE');
+
+assert.throws(() => gym.importMembersCsv('name,email\nAsha,a@b.com', 'test'), /name and mobile/);
+const csvImport = gym.importMembersCsv(
+  'Name,Phone,Email,Plan,Activity,Trainer,Notes\n"Menon, Asha",9811199001,asha.csv@gymkhana.test,Monthly,Badminton,Neha Kapoor,From CSV\nKabir Seth,9811199002,,Quarterly,Gym,,\nIra Nair,9811199005,,,Gym,,\nKabir Twin,9811199002,,,Gym,,\nNo Plan,9876500888,,,Gym,,\nBad Plan,9811199003,,Gold,Gym,,\n,9811199004,,,,\nShort,12,,,,\n',
+  'test',
+);
+assert.equal(csvImport.created, 3);
+assert.equal(csvImport.skipped, 2);
+assert.ok(csvImport.errors.some((row) => /Unknown plan/.test(row.reason)));
+assert.ok(csvImport.errors.some((row) => /member name/.test(row.reason)));
+assert.ok(csvImport.errors.some((row) => /10-digit/.test(row.reason)));
+const ashaCsv = gym.listMembers('all', '9811199001').find((row) => row.mobile === '9811199001');
+assert.equal(ashaCsv?.name, 'Menon, Asha');
+assert.equal(ashaCsv?.planName, 'Monthly');
+assert.equal(ashaCsv?.coachName, 'Neha Kapoor');
+assert.equal(ashaCsv?.accessInterest, 'Badminton');
+const kabirCsv = gym.listMembers('all', '9811199002').find((row) => row.mobile === '9811199002');
+assert.equal(kabirCsv?.membershipStatus, 'ACTIVE');
+const iraCsv = gym.listMembers('all', '9811199005').find((row) => row.mobile === '9811199005');
+assert.equal(iraCsv?.membershipStatus, 'PENDING');
+
+const pass = gym.memberPass(deskApproved.customerId);
+assert.equal(gym.readMemberId(undefined, pass), deskApproved.customerId);
+assert.equal(gym.readMemberId(`gym_member=${encodeURIComponent(pass)}`), deskApproved.customerId);
+assert.ok(gym.memberCookie(deskApproved.customerId, pass).includes('Max-Age=34560000'));
+assert.throws(() => gym.scanActivityGate('badminton'), /Register once on this phone/);
+const gateByPass = gym.scanActivityGate('tennis', undefined, pass);
+assert.equal(gateByPass.sport, 'Tennis');
+assert.equal(gateByPass.name, gym.memberProfile(deskApproved.customerId).member.name);
+const gateByCookie = gym.scanActivityGate('table-tennis', `gym_member=${encodeURIComponent(pass)}`);
+assert.equal(gateByCookie.sport, 'Table tennis');
+assert.equal(gateByCookie.already, false);
+
+assert.equal(fillTemplate('Hello {{name}}, id {{membership_id}}.', { name: 'Asha', membership_id: 'GK1' }), 'Hello Asha, id GK1.');
+const comms = await import('./comms');
+assert.ok(ashaCsv);
+comms.setConsent(ashaCsv.id, { status: 'OPT_IN', marketingStatus: 'OPT_IN', source: 'test' }, 'test');
+const readyPreview = comms.previewCampaign({
+  templateKey: 'announcement',
+  audience: 'selected',
+  memberIds: [ashaCsv.id],
+  extras: { headline: 'Pool closed', details: 'Tomorrow' },
+});
+assert.equal(readyPreview.recipientCount, 1);
+assert.match(readyPreview.previews[0]?.preview ?? '', /Pool closed/);
+comms.setConsent(ashaCsv.id, { status: 'OPT_OUT', source: 'test' }, 'test');
+const blocked = comms.previewCampaign({
+  templateKey: 'announcement',
+  audience: 'selected',
+  memberIds: [ashaCsv.id],
+  extras: { headline: 'Pool closed', details: 'Tomorrow' },
+});
+assert.equal(blocked.recipientCount, 0);
+assert.equal(blocked.excluded[0]?.reason, 'Opted out');
+comms.setConsent(ashaCsv.id, { status: 'OPT_IN', marketingStatus: 'OPT_IN', source: 'test' }, 'test');
+const queued = comms.createCampaign({
+  name: 'Pool notice',
+  templateKey: 'announcement',
+  audience: 'selected',
+  memberIds: [ashaCsv.id],
+  extras: { headline: 'Pool closed', details: 'Tomorrow' },
+  confirm: true,
+  actor: 'test',
+});
+assert.ok(queued.campaignId);
+assert.equal(queued.recipientCount, 1);
+const overview = comms.commsOverview();
+assert.equal(overview.eligible >= 1, true);
+assert.equal(overview.pending >= 1, true);
+assert.equal(overview.delivered, 0);
+const unknown = gym.listMembers('wa_unknown');
+assert.ok(unknown.every((row) => row.consentStatus === 'UNKNOWN'));
+const opted = gym.listMembers('wa_opted_in').find((row) => row.id === ashaCsv.id);
+assert.equal(opted?.consentStatus, 'OPT_IN');
 
 console.log('server tests passed');

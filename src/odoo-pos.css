@@ -227,6 +227,14 @@ body:has(.odoo-pos) {
   overflow: visible;
 }
 
+.o-be-nav__links--desk {
+  overflow-x: auto;
+}
+
+.o-be-nav__links--desk .o-be-nav__link {
+  padding: 0 10px;
+}
+
 .o-be-nav__link {
   display: inline-flex;
   align-items: center;
@@ -544,10 +552,9 @@ body:has(.odoo-pos) {
 }
 
 .o-be-control {
-  display: grid;
-  grid-template-columns: 1fr minmax(260px, 480px) 1fr;
+  display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   min-height: 40px;
   padding: 4px 16px;
   background: #f8f9fa;
@@ -564,8 +571,52 @@ body:has(.odoo-pos) {
   gap: 8px;
 }
 
+.o-be-control__left {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .o-be-control__right {
+  flex: 0 0 auto;
   justify-content: flex-end;
+}
+
+.o-be-subnav {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+  height: auto;
+  overflow: visible;
+  scrollbar-width: none;
+}
+
+.o-be-subnav::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.o-be-subnav__link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  color: #8d8d8d;
+  font-size: 13px;
+  font-weight: 400;
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+}
+
+.o-be-subnav__link:hover,
+.o-be-subnav__link.is-on {
+  color: #111;
+}
+
+.o-be-subnav__link.is-on {
+  border-bottom-color: #111;
 }
 
 .o-be-control__title {
@@ -593,6 +644,10 @@ body:has(.odoo-pos) {
 .o-be-search {
   display: flex;
   align-items: center;
+  flex: 0 0 220px;
+  width: 220px;
+  max-width: 220px;
+  margin-left: auto;
   gap: 10px;
   height: 36px;
   padding: 0 16px;
@@ -4652,6 +4707,42 @@ body:has(.o-login) {
   color: #6c757d;
 }
 
+.o-login__who {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.o-login__who legend {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: #495057;
+}
+
+.o-login__who-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.o-login__who-btn {
+  height: 42px;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  background: #fff;
+  color: #212529;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.o-login__who-btn.is-on {
+  border-color: #111;
+  background: #111;
+  color: #fff;
+}
+
 .o-login__field {
   display: grid;
   gap: 6px;
@@ -5653,6 +5744,18 @@ html:has(.odoo-pos--backend)::-webkit-scrollbar-corner,
   background: #000000;
 }
 
+.odoo-pos--backend .o-be-subnav {
+  overflow: visible;
+  scrollbar-width: none;
+}
+
+.odoo-pos--backend .o-be-subnav::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
 .odoo-pos--backend .o-be-nav,
 .odoo-pos--backend .o-be-nav--light,
 .odoo-pos--backend .o-be-control {
@@ -5664,6 +5767,7 @@ html:has(.odoo-pos--backend)::-webkit-scrollbar-corner,
 .odoo-pos--backend .o-be-nav__brand,
 .odoo-pos--backend .o-be-nav__link,
 .odoo-pos--backend .o-be-control__title,
+.odoo-pos--backend .o-be-subnav__link,
 .odoo-pos--backend .o-be-pager,
 .odoo-pos--backend .o-be-nav .o-icon-btn,
 .odoo-pos--backend .o-be-icon,
@@ -5674,10 +5778,16 @@ html:has(.odoo-pos--backend)::-webkit-scrollbar-corner,
 
 .odoo-pos--backend .o-be-nav--light .o-be-nav__link:hover,
 .odoo-pos--backend .o-be-nav--light .o-be-nav__link.is-active,
+.odoo-pos--backend .o-be-subnav__link:hover,
+.odoo-pos--backend .o-be-subnav__link.is-on,
 .odoo-pos--backend .o-be-icon--bare:hover,
 .odoo-pos--backend .o-be-icon--bare.is-on,
 .odoo-pos--backend .o-be-icon--dots:hover {
   color: #ffffff;
+}
+
+.odoo-pos--backend .o-be-subnav__link.is-on {
+  border-bottom-color: #ffffff;
 }
 
 .odoo-pos--backend .o-be-mark {
@@ -6025,10 +6135,17 @@ td.gk-actions > button + button {
 }
 
 .gk-id {
+  display: block;
   max-width: 220px;
   max-height: 120px;
+  margin-top: 8px;
   object-fit: contain;
   border: 1px solid #dee2e6;
+  background: #111;
+}
+
+.odoo-pos--backend .gk-id {
+  border-color: #2e2e2e;
 }
 
 .o-track,
@@ -6612,6 +6729,67 @@ html:has(.odoo-pos--backend) body:has(.odoo-pos--backend) {
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.gk-user-head {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.o-be-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.o-be-control > .o-be-tools {
+  margin-left: auto;
+}
+
+.o-be-tools .o-be-search {
+  margin-left: 0;
+}
+
+.gk-user-head > .o-be-tools {
+  flex: 1;
+  justify-content: center;
+}
+
+.gk-csv {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid #2e2e2e;
+  border-radius: 8px;
+  background: #1a1a1a;
+}
+
+.gk-csv p,
+.gk-csv__result {
+  margin: 0;
+  color: #c5c5c5;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.gk-csv strong {
+  color: #f3f3f3;
+  font-weight: 600;
+}
+
+.gk-csv__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gk-csv__errors {
+  margin: 0;
+  padding-left: 18px;
+  color: #d4d4d4;
+  font-size: 13px;
 }
 
 .gk-toolbar {
@@ -8137,8 +8315,21 @@ body:has(.o-login),
 .o-login__hint,
 .o-login__foot,
 .o-login__field,
+.o-login__who legend,
 .o-login__card--busy {
   color: #b5b5b5;
+}
+
+.o-login__who-btn {
+  background: #000000;
+  border-color: #2e2e2e;
+  color: #f0f0f0;
+}
+
+.o-login__who-btn.is-on {
+  border-color: #8b1219;
+  background: #8b1219;
+  color: #fff;
 }
 
 .o-login__field input {
@@ -8193,4 +8384,566 @@ body:has(.o-login),
 .gk-pill.is-full {
   background: #fdecea;
   color: #c62828;
+}
+
+.gk-arenas {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0 0 28px;
+}
+
+.gk-arena {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #2a2a2a;
+  background: #111;
+}
+
+.gk-arena__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.gk-arena__head h3 {
+  margin: 0;
+  color: #f2f2f2;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.gk-arena__head p {
+  margin: 4px 0 0;
+  color: #b5b5b5;
+  font-size: 12px;
+}
+
+.gk-arena__qr {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  color: #8d8d8d;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gk-arena__qr .gk-btn {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.gk-arena__qr img,
+.gk-arena__qr-slot {
+  display: block;
+  width: 72px;
+  height: 72px;
+  background: #fff;
+}
+
+.gk-arena__field {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid #f4f4f4;
+  cursor: pointer;
+}
+
+.gk-arena__field:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.gk-arena__paint,
+.gk-arena__mark,
+.gk-arena__gear,
+.gk-arena__paint::before,
+.gk-arena__paint::after,
+.gk-arena__mark::before,
+.gk-arena__mark::after,
+.gk-arena__gear::before,
+.gk-arena__gear::after {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.gk-arena__field.is-badminton {
+  background: #1f6b32;
+}
+
+.gk-arena__field.is-badminton .gk-arena__paint {
+  inset: 8%;
+  border: 2px solid #fff;
+}
+
+.gk-arena__field.is-badminton .gk-arena__paint::before {
+  content: '';
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  background: #111;
+  box-shadow: 0 0 0 1px #fff;
+  transform: translateX(-50%);
+}
+
+.gk-arena__field.is-badminton .gk-arena__paint::after,
+.gk-arena__field.is-badminton .gk-arena__mark,
+.gk-arena__field.is-badminton .gk-arena__mark::before,
+.gk-arena__field.is-badminton .gk-arena__mark::after {
+  content: '';
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
+}
+
+.gk-arena__field.is-badminton .gk-arena__paint::after {
+  top: 18%;
+  bottom: 18%;
+  left: 0;
+  right: 0;
+}
+
+.gk-arena__field.is-badminton .gk-arena__mark {
+  top: 18%;
+  bottom: 18%;
+  left: 8%;
+  width: 18%;
+  border-right: 0;
+}
+
+.gk-arena__field.is-badminton .gk-arena__mark::before {
+  top: -1px;
+  bottom: -1px;
+  right: -18%;
+  width: 18%;
+  left: auto;
+  border-left: 0;
+}
+
+.gk-arena__field.is-badminton .gk-arena__mark::after {
+  top: 50%;
+  left: 0;
+  right: -18%;
+  height: 0;
+  border-width: 1px 0 0;
+}
+
+.gk-arena__field.is-basketball {
+  background: #b4532a;
+}
+
+.gk-arena__field.is-basketball .gk-arena__paint {
+  inset: 6%;
+  border: 2px solid #fff;
+}
+
+.gk-arena__field.is-basketball .gk-arena__paint::before,
+.gk-arena__field.is-basketball .gk-arena__paint::after {
+  content: '';
+  top: 18%;
+  bottom: 18%;
+  width: 22%;
+  border: 2px solid #fff;
+}
+
+.gk-arena__field.is-basketball .gk-arena__paint::before {
+  left: 0;
+  border-left: 0;
+}
+
+.gk-arena__field.is-basketball .gk-arena__paint::after {
+  right: 0;
+  border-right: 0;
+}
+
+.gk-arena__field.is-basketball .gk-arena__mark {
+  top: 50%;
+  left: 50%;
+  width: 22%;
+  aspect-ratio: 1;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.gk-arena__field.is-football {
+  background: #2e7d32;
+}
+
+.gk-arena__field.is-football .gk-arena__paint {
+  inset: 6%;
+  border: 2px solid #fff;
+}
+
+.gk-arena__field.is-football .gk-arena__paint::before {
+  content: '';
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  background: #fff;
+  transform: translateX(-50%);
+}
+
+.gk-arena__field.is-football .gk-arena__paint::after {
+  content: '';
+  top: 50%;
+  left: 50%;
+  width: 22%;
+  aspect-ratio: 1;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.gk-arena__field.is-football .gk-arena__mark {
+  inset: 6%;
+  border: 0;
+}
+
+.gk-arena__field.is-football .gk-arena__mark::before,
+.gk-arena__field.is-football .gk-arena__mark::after {
+  content: '';
+  top: 18%;
+  bottom: 18%;
+  width: 18%;
+  border: 2px solid #fff;
+}
+
+.gk-arena__field.is-football .gk-arena__mark::before {
+  left: 0;
+  border-left: 0;
+}
+
+.gk-arena__field.is-football .gk-arena__mark::after {
+  right: 0;
+  left: auto;
+  border-right: 0;
+}
+
+.gk-arena__field.is-swimming {
+  background:
+    repeating-linear-gradient(
+      180deg,
+      #1565c0 0 18%,
+      #e8f1ff 18% 20%
+    );
+}
+
+.gk-arena__field.is-swimming .gk-arena__paint {
+  inset: 7% 4%;
+  border: 2px solid #fff;
+}
+
+.gk-arena__field.is-swimming .gk-arena__mark {
+  top: 7%;
+  left: 4%;
+  right: 4%;
+  height: 10%;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.gk-arena__field.is-gym {
+  background:
+    linear-gradient(90deg, #171717 0 27%, #121212 27% 73%, #171717 73% 100%);
+  border-color: #6f6f6f;
+}
+
+.gk-arena__field.is-gym .gk-arena__paint {
+  top: 10%;
+  bottom: 26%;
+  left: 5%;
+  width: 23%;
+  border: 2px solid #8d99a6;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 9px,
+      #d0d5da 9px 12px,
+      transparent 12px 20px
+    ),
+    #2a2a2a;
+}
+
+.gk-arena__field.is-gym .gk-arena__paint::before {
+  content: '';
+  left: 10%;
+  right: 10%;
+  top: 8%;
+  height: 12%;
+  background: repeating-linear-gradient(90deg, #37474f 0 20%, #b0bec5 20% 32%);
+}
+
+.gk-arena__field.is-gym .gk-arena__paint::after {
+  content: '';
+  left: 12%;
+  right: 12%;
+  bottom: 8%;
+  height: 16%;
+  background: #4e342e;
+  border: 1.5px solid #d7ccc8;
+}
+
+.gk-arena__field.is-gym .gk-arena__mark {
+  top: 20%;
+  bottom: 20%;
+  left: 33%;
+  right: 31%;
+  background: #5d4037;
+  border: 2px solid #efebe9;
+  box-shadow: inset 0 0 0 5px #3e2723;
+}
+
+.gk-arena__field.is-gym .gk-arena__mark::before {
+  content: '';
+  top: 50%;
+  left: 50%;
+  width: 30%;
+  aspect-ratio: 1;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.gk-arena__field.is-gym .gk-arena__mark::after {
+  content: '';
+  left: 12%;
+  right: 12%;
+  bottom: 10%;
+  height: 10%;
+  background: #212121;
+}
+
+.gk-arena__field.is-gym .gk-arena__gear {
+  top: 10%;
+  bottom: 10%;
+  right: 5%;
+  width: 23%;
+  border: 2px solid #90a4ae;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      #78909c 0 14%,
+      #455a64 14% 16%,
+      #1b1b1b 16% 22%
+    );
+}
+
+.gk-arena__field.is-gym .gk-arena__gear::before {
+  content: '';
+  inset: 7%;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+}
+
+.gk-arena__field.is-gym .gk-arena__gear::after {
+  content: '';
+  left: 16%;
+  right: 16%;
+  top: 0;
+  height: 7px;
+  background: #90caf9;
+}
+
+.gk-arena__field.is-skating {
+  background: #1c313a;
+}
+
+.gk-arena__field.is-skating .gk-arena__paint {
+  inset: 10% 8%;
+  border: 3px solid #eceff1;
+  border-radius: 46%;
+  background: radial-gradient(circle at 50% 50%, #90a4ae 0 42%, #455a64 70%, #263238 100%);
+}
+
+.gk-arena__field.is-skating .gk-arena__mark {
+  inset: 22% 18%;
+  border: 2px dashed rgba(255, 255, 255, 0.55);
+  border-radius: 46%;
+}
+
+.gk-arena__field.is-tennis {
+  background: #3d7a3a;
+}
+
+.gk-arena__field.is-tennis .gk-arena__paint {
+  inset: 8%;
+  border: 2px solid #fff;
+}
+
+.gk-arena__field.is-tennis .gk-arena__paint::before {
+  content: '';
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  background: #fff;
+  transform: translateX(-50%);
+}
+
+.gk-arena__field.is-tennis .gk-arena__paint::after,
+.gk-arena__field.is-tennis .gk-arena__mark,
+.gk-arena__field.is-tennis .gk-arena__mark::before,
+.gk-arena__field.is-tennis .gk-arena__mark::after {
+  content: '';
+  border: 1.5px solid #fff;
+}
+
+.gk-arena__field.is-tennis .gk-arena__paint::after {
+  top: 18%;
+  bottom: 18%;
+  left: 0;
+  right: 0;
+}
+
+.gk-arena__field.is-tennis .gk-arena__mark {
+  top: 18%;
+  bottom: 18%;
+  left: 8%;
+  width: 18%;
+  border-right: 0;
+}
+
+.gk-arena__field.is-tennis .gk-arena__mark::before {
+  top: -1px;
+  bottom: -1px;
+  right: -18%;
+  width: 18%;
+  left: auto;
+  border-left: 0;
+}
+
+.gk-arena__field.is-tennis .gk-arena__mark::after {
+  top: 50%;
+  left: 0;
+  right: -18%;
+  height: 0;
+  border-width: 1px 0 0;
+}
+
+.gk-arena__field.is-table-tennis {
+  background: #12351f;
+}
+
+.gk-arena__field.is-table-tennis .gk-arena__paint {
+  inset: 16% 10%;
+  border: 2px solid #fff;
+  background: #1b7a3a;
+}
+
+.gk-arena__field.is-table-tennis .gk-arena__paint::before {
+  content: '';
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  background: #fff;
+  transform: translateX(-50%);
+}
+
+.gk-arena__field.is-table-tennis .gk-arena__mark {
+  top: 10%;
+  bottom: 10%;
+  left: 48.5%;
+  width: 3%;
+  background: #f5f5f5;
+  box-shadow: 0 0 0 1px #111;
+}
+
+.gk-arena__people {
+  display: grid;
+  grid-template-columns: repeat(10, 10px);
+  gap: 4px;
+  margin-top: 10px;
+  justify-content: start;
+}
+
+.gk-dot {
+  width: 10px;
+  height: 10px;
+  background: #c62828;
+}
+
+.gk-dot.is-in {
+  background: #2e7d32;
+}
+
+@media (max-width: 1280px) {
+  .gk-arenas {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .gk-arenas {
+    grid-template-columns: 1fr;
+  }
+}
+
+.gk-comms-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  padding: 0 16px 12px;
+}
+
+.gk-comms-filters label,
+.gk-comms-dates label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #6c757d;
+}
+
+.gk-comms-filters input[type='date'],
+.gk-comms-dates input[type='date'],
+.gk-comms-form input,
+.gk-comms-form textarea {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid #d9d9d9;
+  background: #fff;
+  font: inherit;
+}
+
+.gk-comms-dates {
+  display: flex;
+  gap: 10px;
+}
+
+.gk-comms-form {
+  display: grid;
+  gap: 12px;
+  max-width: 720px;
+  padding: 0 16px 24px;
+}
+
+.gk-comms-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.gk-comms-preview,
+.gk-comms-confirm {
+  padding: 12px 14px;
+  border: 1px solid #ececec;
+  background: #fafafa;
+}
+
+.gk-comms-confirm {
+  margin: 0 16px 24px;
+}
+
+.gk-comms-warn {
+  color: #a15c00;
+  padding: 0 16px 8px;
 }

@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
-import { SIGNUP_ACTIVITIES } from '../../../shared/activities';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { gateNext, matchActivity, SIGNUP_ACTIVITIES } from '../../../shared/activities';
 import { api } from '../../lib/api';
+import { readIdImage } from '../../lib/idImage';
+import { saveMemberPass } from '../../lib/memberPass';
 import { Dropdown } from '../pos/gym/record';
 import ball from './assets/ball.png';
 import curtains from './assets/curtains.jpg';
 import dumbbells from './assets/dumbbells.png';
 import star from './assets/star.png';
+import { makeDemoMember } from './demoMember';
 import { readFile } from './photo';
 import './register.css';
 
@@ -25,12 +28,15 @@ function splitName(value: string) {
 }
 
 export function RegisterPage() {
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = gateNext(params.get('next'));
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [mobile, setMobile] = useState('');
-  const [activity, setActivity] = useState('');
+  const [activity, setActivity] = useState(() => matchActivity(params.get('activity') ?? ''));
   const [trainer, setTrainer] = useState<'yes' | 'no' | ''>('');
   const [portrait, setPortrait] = useState('');
   const [portraitName, setPortraitName] = useState('');
@@ -40,6 +46,7 @@ export function RegisterPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [filed, setFiled] = useState<Filed | null>(null);
+  const [demo, setDemo] = useState(false);
 
   useEffect(() => {
     document.title = 'Registration · Gymkhana';
@@ -55,14 +62,17 @@ export function RegisterPage() {
     if (!file) return;
     try {
       setError('');
-      const url = await readFile(file);
       if (slot === 'portrait') {
+        if (!file.type.startsWith('image/')) throw new Error('Photograph is your personal photo.');
+        const url = await readFile(file);
         setPortrait(url);
         setPortraitName(file.name);
-      } else {
-        setIdPhoto(url);
-        setIdName(file.name);
+        return;
       }
+      if (!file.type.startsWith('image/')) throw new Error('Upload a photo of the ID, nothing else.');
+      const shot = await readIdImage(file);
+      setIdPhoto(shot);
+      setIdName(file.name);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not take that file.');
     }
@@ -104,7 +114,7 @@ export function RegisterPage() {
       return;
     }
     if (!portrait) {
-      setError('Upload a photograph.');
+      setError('Upload a photograph of yourself.');
       return;
     }
     if (!idPhoto) {
@@ -113,7 +123,7 @@ export function RegisterPage() {
     }
     setBusy(true);
     try {
-      const data = await api<{ request: { ref: string; wantsTrainer: boolean } }>('/api/portal/join', {
+      const data = await api<{ request: { ref: string; wantsTrainer: boolean }; memberToken?: string }>('/api/portal/join', {
         method: 'POST',
         body: JSON.stringify({
           signup: true,
@@ -126,8 +136,14 @@ export function RegisterPage() {
           photoUrl: portrait,
           govtIdUrl: idPhoto,
           wantsTrainer: trainer === 'yes',
+          demo,
         }),
       });
+      saveMemberPass(data.memberToken);
+      if (next) {
+        navigate(next, { replace: true });
+        return;
+      }
       setFiled({ ref: data.request.ref, wantsTrainer: data.request.wantsTrainer });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not file this.');
@@ -157,9 +173,32 @@ export function RegisterPage() {
           <img className="gkf-orb" src={ball} alt="" />
         </header>
           <form className="gkf-form" onSubmit={(event) => void submit(event)} noValidate>
+            <button
+              type="button"
+              className="gkf-demo"
+              onClick={() => {
+                const pack = makeDemoMember(activity || 'Badminton');
+                setError('');
+                setDemo(true);
+                setFullName(pack.name);
+                setEmail(pack.email);
+                setPassword(pack.password);
+                setShowPassword(true);
+                setMobile(pack.mobile);
+                if (!activity) setActivity('Badminton');
+                setTrainer('no');
+                setPortrait(pack.portrait);
+                setPortraitName('demo-photo.jpg');
+                setIdPhoto(pack.idPhoto);
+                setIdName('demo-member-id.jpg');
+              }}
+            >
+              Use demo member
+            </button>
+
             <label className="gkf-field">
               <span>Full Name</span>
-              <input value={fullName} autoComplete="name" onChange={(event) => { setError(''); setFullName(event.target.value); }} />
+              <input value={fullName} autoComplete="name" onChange={(event) => { setError(''); setDemo(false); setFullName(event.target.value); }} />
             </label>
 
             <label className="gkf-field">
@@ -243,16 +282,23 @@ export function RegisterPage() {
               >
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp"
                   className="gkf-file"
                   onChange={(event: ChangeEvent<HTMLInputElement>) => void takeFile('portrait', event.target.files?.[0])}
                 />
-                {portrait ? <em>{portraitName || 'Photo attached'}</em> : <em>Upload photo</em>}
+                {portrait ? (
+                  <span className="gkf-drop__held">
+                    <img src={portrait} alt="" />
+                    <em>{portraitName || 'Your photo'}</em>
+                  </span>
+                ) : (
+                  <em>Your photo</em>
+                )}
               </label>
             </div>
 
             <div className="gkf-field">
-              <span>Valid Government Id Proof</span>
+              <span>Valid Government ID</span>
               <label
                 className={`gkf-drop${over === 'id' ? ' is-over' : ''}${idPhoto ? ' is-held' : ''}`}
                 onDragOver={(event) => { event.preventDefault(); setOver('id'); }}
@@ -261,11 +307,18 @@ export function RegisterPage() {
               >
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp"
                   className="gkf-file"
                   onChange={(event: ChangeEvent<HTMLInputElement>) => void takeFile('id', event.target.files?.[0])}
                 />
-                {idPhoto ? <em>{idName || 'ID attached'}</em> : <em>Upload photo</em>}
+                {idPhoto ? (
+                  <span className="gkf-drop__held">
+                    <img src={idPhoto} alt="" />
+                    <em>{idName || 'ID attached'}</em>
+                  </span>
+                ) : (
+                  <em>Upload ID photo</em>
+                )}
               </label>
             </div>
 

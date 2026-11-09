@@ -2,9 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check, ImagePlus, X } from 'lucide-react';
 import { formatINR } from '../../../shared/domain';
+import { normalizeGovtId } from '../../../shared/govtId';
 import { SLOT_DAYS, slotLabel } from '../../../shared/slots';
 import { api } from '../../lib/api';
 import { readIdImage } from '../../lib/idImage';
+import { saveMemberPass } from '../../lib/memberPass';
 import { openRazorpayCheckout, type RazorpayResult } from '../../lib/razorpayCheckout';
 import { useTitle } from '../../lib/useTitle';
 import './join.css';
@@ -157,7 +159,10 @@ function detailErrors(draft: Draft) {
   if (age === null || draft.dob >= todayYmd()) errors.dob = 'Enter your date of birth.';
   else if (age < 3 || age > 100) errors.dob = 'Members must be between 3 and 100.';
   if (!draft.idType) errors.idType = 'Choose an ID type.';
-  if (!/^[A-Za-z0-9]{4,20}$/.test(draft.idNumber.replace(/[\s-]/g, ''))) errors.idNumber = 'Enter the ID number.';
+  else {
+    const parsed = normalizeGovtId(draft.idType, draft.idNumber);
+    if ('error' in parsed) errors.idNumber = parsed.error;
+  }
   if (draft.wantsTrainer === null) errors.wantsTrainer = 'Choose whether you want a trainer.';
   return errors;
 }
@@ -379,7 +384,7 @@ export function JoinDetailsPage() {
             </span>
           </Input>
           <div className="gkj-span">
-            <span className="gkj-field__label">Photo of your ID <em>optional</em></span>
+            <span className="gkj-field__label">Photo of this ID</span>
             {draft.idPhoto ? (
               <div className="gkj-photo">
                 <img src={draft.idPhoto} alt="Your government ID" />
@@ -512,7 +517,7 @@ export function JoinPlanPage() {
     setFailure('');
     let requestId = '';
     try {
-      const { request } = await api<{ request: PublicRequest }>('/api/portal/join', {
+      const { request, memberToken } = await api<{ request: PublicRequest; memberToken?: string }>('/api/portal/join', {
         method: 'POST',
         body: JSON.stringify({
           sport: draft.sport,
@@ -530,6 +535,7 @@ export function JoinPlanPage() {
         }),
       });
       requestId = request.id;
+      saveMemberPass(memberToken);
       if (online) {
         const session = await api<Checkout>(`/api/portal/join/${request.id}/pay`, { method: 'POST', body: '{}' });
         const result: RazorpayResult = await openRazorpayCheckout({

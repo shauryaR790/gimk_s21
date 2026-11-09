@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { gateNext } from '../../../shared/activities';
 import { api } from '../../lib/api';
+import { saveMemberPass } from '../../lib/memberPass';
 import ball from './assets/ball.png';
 import curtains from './assets/curtains.jpg';
 import './register.css';
@@ -21,6 +23,8 @@ function Eye({ open }: { open: boolean }) {
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = gateNext(params.get('next'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -53,7 +57,7 @@ export function LoginPage() {
     }
     setBusy(true);
     try {
-      const data = await api<{ ok: boolean; pending?: boolean }>('/api/portal/login', {
+      const data = await api<{ ok: boolean; pending?: boolean; memberToken?: string }>('/api/portal/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
@@ -61,7 +65,8 @@ export function LoginPage() {
         setNote('Your registration is still being confirmed. We will write to this email when it is ready.');
         return;
       }
-      navigate('/', { replace: true });
+      saveMemberPass(data.memberToken);
+      navigate(next || '/', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not sign in.');
     } finally {

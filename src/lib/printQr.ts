@@ -15,6 +15,15 @@ export async function printTableQr(table: TableInfo, cafeName = 'After Dunes') {
   writeQrSheet(`<article><h1>${escapeHtml(cafeName)}</h1><p>Table ${escapeHtml(tableLabel(table.name))}</p><img src="${src}" alt=""><p>${escapeHtml(url)}</p></article>`, `QR ${tableLabel(table.name)}`);
 }
 
+export async function printActivityQr(sport: string, slug: string) {
+  const url = `${window.location.origin}/in/${encodeURIComponent(slug)}`;
+  const src = await QRCode.toDataURL(url, { width: 560, margin: 1 });
+  writeQrSheet(
+    `<article><h1>Gymkhana</h1><p>${escapeHtml(sport)}</p><img src="${src}" alt=""><p>Scan with iPhone or Android camera</p><p>${escapeHtml(url)}</p></article>`,
+    `${sport} gate`,
+  );
+}
+
 export async function printAllTableQr(tables: TableInfo[], cafeName = 'After Dunes') {
   const cards = await Promise.all(tables.map(async (table) => {
     const url = `${window.location.origin}/menu?table=${encodeURIComponent(table.qrCode)}`;

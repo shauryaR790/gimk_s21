@@ -54,7 +54,7 @@ export function OdooFoHLayout() {
       <header className="o-foh-nav">
         <div className="o-foh-tabs">
           <NavLink to="/pos/backend/facilities" className={({ isActive }) => `o-foh-tab${isActive ? ' is-active' : ''}`}>
-            Facilities
+            Activities
           </NavLink>
           <NavLink to="/pos/app/register" className={({ isActive }) => `o-foh-tab${isActive ? ' is-active' : ''}`}>
             POS
