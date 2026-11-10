@@ -14,7 +14,6 @@ import { BackendPlaceholderPage } from './odoo/BackendPlaceholderPage';
 import { CustomerDisplayPage } from './odoo/CustomerDisplayPage';
 import {
   BookingsPage,
-  CheckInPage,
   ClassesPage,
   EmployeesPage,
   FacilitiesPage,
@@ -89,7 +88,7 @@ export default function PosShell() {
           <Route path="backend/bookings/new" element={<BookingRecordPage />} />
           <Route path="backend/bookings/:id" element={<BookingRecordPage />} />
           <Route path="backend/bookings" element={<BookingsPage />} />
-          <Route path="backend/check-in" element={<CheckInPage />} />
+          <Route path="backend/check-in" element={<Navigate to="/pos/backend/people?tab=in" replace />} />
           <Route path="backend/classes" element={<ClassesPage />} />
           <Route path="backend/participants/new" element={<ParticipantRecordPage />} />
           <Route path="backend/rentals" element={<Navigate to="/pos/backend/inventory" replace />} />
