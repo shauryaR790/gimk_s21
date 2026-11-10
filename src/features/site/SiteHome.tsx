@@ -134,14 +134,18 @@ export function SiteHome() {
         ? Math.max(1, hero.offsetHeight)
         : root.clientHeight;
       const next = Math.min(1, Math.max(0, root.scrollTop / range));
+      const activities = root.querySelector('.gka');
       const register = root.querySelector('.gkr');
       let reg = 0;
-      if (register instanceof HTMLElement) {
-        // Hold the docked nav title through Activities. Full-height pages can
-        // only scroll until register is flush with the viewport, so run the
-        // register morph over a short window at the end of the second page.
-        const lead = Math.max(1, Math.round(root.clientHeight * 0.16));
-        const start = register.offsetTop - lead;
+      if (activities instanceof HTMLElement && register instanceof HTMLElement) {
+        // Hold the docked nav title for the whole Activities page. Full-height
+        // pages only scroll until Register is flush, so morph over the final
+        // stretch of that second page — not mid-scroll.
+        const pageStart = activities.offsetTop;
+        const pageEnd = register.offsetTop;
+        const span = Math.max(1, pageEnd - pageStart);
+        const lead = Math.max(12, Math.round(span * 0.03));
+        const start = pageEnd - lead;
         reg = Math.min(1, Math.max(0, (root.scrollTop - start) / lead));
       }
       root.style.setProperty('--hero', next.toFixed(4));
