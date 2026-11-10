@@ -137,9 +137,12 @@ export function SiteHome() {
       const register = root.querySelector('.gkr');
       let reg = 0;
       if (register instanceof HTMLElement) {
-        const start = register.offsetTop - root.clientHeight;
-        const span = Math.max(1, register.offsetHeight);
-        reg = Math.min(1, Math.max(0, (root.scrollTop - start) / span));
+        // Hold the docked nav title through Activities. Full-height pages can
+        // only scroll until register is flush with the viewport, so run the
+        // register morph over a short window at the end of the second page.
+        const lead = Math.max(1, Math.round(root.clientHeight * 0.16));
+        const start = register.offsetTop - lead;
+        reg = Math.min(1, Math.max(0, (root.scrollTop - start) / lead));
       }
       root.style.setProperty('--hero', next.toFixed(4));
       root.style.setProperty('--reg', reg.toFixed(4));
