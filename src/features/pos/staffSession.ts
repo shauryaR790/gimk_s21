@@ -12,7 +12,6 @@ export const DESK_HOMES: Record<DeskMode, string> = {
 export const EMPLOYEE_LINKS = [
   { to: '/pos', label: 'Dashboard', end: true },
   { to: '/pos/backend/bookings', label: 'Bookings' },
-  { to: '/pos/backend/check-in', label: 'Check-in' },
   { to: '/pos/backend/people', label: 'Active users' },
   { to: '/pos/backend/communications', label: 'Communications' },
   { to: '/pos/backend/shift', label: 'Shift' },

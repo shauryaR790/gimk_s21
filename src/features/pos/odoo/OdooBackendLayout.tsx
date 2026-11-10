@@ -201,7 +201,6 @@ function controlTitle(pathname: string) {
   if (pathname.includes('/backend/employees')) return 'Employees';
   if (pathname.includes('/backend/facilities')) return 'Activities';
   if (pathname.includes('/backend/maintenance')) return 'Maintenance';
-  if (pathname.includes('/backend/check-in')) return 'Check-in';
   if (pathname.includes('/backend/classes') || pathname.includes('/backend/participants')) return 'Classes & Coaching';
   if (pathname.includes('/backend/rentals')) return 'Equipment Rentals';
   if (pathname.includes('/backend/communications')) return 'Communications';
@@ -320,9 +319,6 @@ export function OdooBackendLayout() {
             </button>
             {menuOpen ? (
               <div className="o-be-dropdown o-be-dropdown--right" role="menu" onClick={(e) => e.stopPropagation()}>
-                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/check-in'); }}>
-                  Check-in
-                </button>
                 <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/people'); }}>
                   Active users
                 </button>
