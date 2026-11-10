@@ -1,17 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { SIGNUP_ACTIVITIES } from '../../../shared/activities';
-import ball from './assets/ball.png';
-import dumbbells from './assets/dumbbells.png';
-import grain from './assets/grain.jpg';
+import film from './assets/bgjimk.mp4';
+import filmPoster from './assets/bgjimk-poster.jpg';
 import grid from './assets/grid.jpg';
 import orb from './assets/orb.png';
-import queen from './assets/queen.png';
 import star from './assets/star.png';
-import stripes from './assets/stripes.png';
+import { SportMark } from './sportMarks';
 import './site.css';
 
 const ACTIVITIES = SIGNUP_ACTIVITIES;
+
+const ACTIVITY_COPY: Record<(typeof ACTIVITIES)[number], string> = {
+  Badminton: 'Morning smash sessions through late mixed doubles. Walk in or lock a slot.',
+  Basketball: 'Full-court nights, half-court mornings, and open shootaround on off-league days.',
+  Football: 'Floodlit five-a-side, seven-a-side, and weekend friendlies. Boots on, play.',
+  Gym: 'Racks, strength floor, and trainers on site. Come for a lift or a programme.',
+  Skating: 'Rink hours for learners and regulars — figure, speed, and open skate.',
+  Swimming: 'Lap lanes and leisure hours. Early club, stroke coaching, evening lengths.',
+  Tennis: 'Hard courts for rally, coaching, and sets. Book a court or find a partner.',
+  'Table tennis': 'Club nights, spin drills, and walk-up games. Paddle up and take the end.',
+};
 
 function useInView<T extends Element>() {
   const ref = useRef<T>(null);
@@ -79,18 +88,21 @@ function Hero() {
 function Activities() {
   const [ref, inView] = useInView<HTMLElement>();
   return (
-    <section ref={ref} id="activities" className={`gka${inView ? ' is-in' : ''}`} style={{ backgroundImage: `url(${grain})` }}>
-      <div className="gka-stripes" style={{ backgroundImage: `url(${stripes})` }} />
-      <div className="gka-bar" />
-      <img className="gka-queen" src={queen} alt="" />
-      <img className="gka-ball" src={ball} alt="" />
+    <section ref={ref} id="activities" className={`gka${inView ? ' is-in' : ''}`}>
       <h2 className="gka-title">ACTIVITIES</h2>
-      <img className="gka-dumbbells" src={dumbbells} alt="" />
-      <ul className="gka-list">
-        {ACTIVITIES.map((name, index) => (
-          <li key={name} style={{ ['--i' as string]: index }}>{name.toUpperCase()}</li>
-        ))}
-      </ul>
+      <div className="gka-board">
+        <ul className="gka-cards">
+          {ACTIVITIES.map((name, index) => (
+            <li key={name} className="gka-card" style={{ ['--i' as string]: index }}>
+              <div className="gka-card__copy">
+                <strong>{name}</strong>
+                <p>{ACTIVITY_COPY[name]}</p>
+              </div>
+              <SportMark sport={name} />
+            </li>
+          ))}
+        </ul>
+      </div>
     </section>
   );
 }
@@ -98,21 +110,22 @@ function Activities() {
 function Register() {
   const [ref, inView] = useInView<HTMLElement>();
   return (
-    <section ref={ref} id="register" className={`gkr${inView ? ' is-in' : ''}`} style={{ backgroundImage: `url(${grain})` }}>
-      <div className="gkr-stripes" style={{ backgroundImage: `url(${stripes})` }} />
-      <div className="gkr-bar" />
+    <section ref={ref} id="register" className={`gkr${inView ? ' is-in' : ''}`}>
       <h2 className="gkr-title" aria-hidden="true">GYMKHANA</h2>
       <p className="gkr-sector">SECTOR 19</p>
       <img className="gkr-star" src={star} alt="" />
-      <Link className="gkr-cta" to="/register">REGISTER<br />NOW</Link>
-      <a className="gkr-phone" href="tel:+911010100001">+91 10101 00001</a>
-      <a className="gkr-mail" href="mailto:Contact@gymkhana.com">Contact@gymkhana.com</a>
+      <Link className="gkr-cta" to="/register">REGISTER NOW</Link>
+      <p className="gkr-contact">
+        <a className="gkr-phone" href="tel:+911010100001">+91 10101 00001</a>
+        <a className="gkr-mail" href="mailto:Contact@gymkhana.com">Contact@gymkhana.com</a>
+      </p>
     </section>
   );
 }
 
 export function SiteHome() {
   const scrollerRef = useRef<HTMLElement>(null);
+  const filmRef = useRef<HTMLVideoElement>(null);
   const [gate, setGate] = useState(false);
   useEffect(() => {
     document.title = 'Gymkhana · Sector 19';
@@ -129,29 +142,31 @@ export function SiteHome() {
     let frame = 0;
     const update = () => {
       frame = 0;
+      const origin = root.getBoundingClientRect().top;
+      const yOf = (el: Element) => root.scrollTop + (el.getBoundingClientRect().top - origin);
       const hero = root.querySelector('.gkh');
       const range = hero instanceof HTMLElement
         ? Math.max(1, hero.offsetHeight)
         : root.clientHeight;
       const next = Math.min(1, Math.max(0, root.scrollTop / range));
-      const activities = root.querySelector('.gka');
       const register = root.querySelector('.gkr');
       let reg = 0;
-      if (activities instanceof HTMLElement && register instanceof HTMLElement) {
-        // Hold the docked nav title for the whole Activities page. Full-height
-        // pages only scroll until Register is flush, so morph over the final
-        // stretch of that second page — not mid-scroll.
-        const pageStart = activities.offsetTop;
-        const pageEnd = register.offsetTop;
-        const span = Math.max(1, pageEnd - pageStart);
-        const lead = Math.max(12, Math.round(span * 0.03));
-        const start = pageEnd - lead;
-        reg = Math.min(1, Math.max(0, (root.scrollTop - start) / lead));
+      if (next >= 0.98 && register instanceof HTMLElement && register.offsetHeight >= root.clientHeight * 0.85) {
+        const top = yOf(register);
+        const shown = (root.scrollTop + root.clientHeight - top) / Math.max(1, register.offsetHeight);
+        const t = Math.min(1, Math.max(0, shown));
+        reg = t * t * (3 - 2 * t);
       }
       root.style.setProperty('--hero', next.toFixed(4));
       root.style.setProperty('--reg', reg.toFixed(4));
       root.classList.toggle('is-docked', next >= 0.92 && reg < 0.08);
-      root.classList.toggle('is-away', next >= 0.5);
+      const filmNode = filmRef.current;
+      if (filmNode) {
+        const quiet = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (next >= 0.55 && !quiet) {
+          if (filmNode.paused) void filmNode.play();
+        } else if (!filmNode.paused) filmNode.pause();
+      }
     };
     const onScroll = () => {
       if (!frame) frame = window.requestAnimationFrame(update);
@@ -175,37 +190,6 @@ export function SiteHome() {
   }, [gate]);
   return (
     <main className="gks" ref={scrollerRef}>
-      <svg className="gks-defs" aria-hidden="true">
-        <defs>
-          <clipPath id="gk-wave-clip" clipPathUnits="objectBoundingBox">
-            <path d="M0,-1 L0,2 L0.9,2 C0.88,1.979,0.86,1.958,0.852,1.938 C0.845,1.917,0.849,1.896,0.858,1.875 C0.867,1.854,0.881,1.833,0.888,1.813 C0.896,1.792,0.898,1.771,0.9,1.75 C0.902,1.729,0.904,1.708,0.912,1.688 C0.919,1.667,0.933,1.646,0.942,1.625 C0.951,1.604,0.955,1.583,0.948,1.563 C0.94,1.542,0.92,1.521,0.9,1.5 C0.88,1.479,0.86,1.458,0.852,1.438 C0.845,1.417,0.849,1.396,0.858,1.375 C0.867,1.354,0.881,1.333,0.888,1.313 C0.896,1.292,0.898,1.271,0.9,1.25 C0.902,1.229,0.904,1.208,0.912,1.188 C0.919,1.167,0.933,1.146,0.942,1.125 C0.951,1.104,0.955,1.083,0.948,1.063 C0.94,1.042,0.92,1.021,0.9,1 C0.88,0.979,0.86,0.958,0.852,0.938 C0.845,0.917,0.849,0.896,0.858,0.875 C0.867,0.854,0.881,0.833,0.888,0.813 C0.896,0.792,0.898,0.771,0.9,0.75 C0.902,0.729,0.904,0.708,0.912,0.688 C0.919,0.667,0.933,0.646,0.942,0.625 C0.951,0.604,0.955,0.583,0.948,0.563 C0.94,0.542,0.92,0.521,0.9,0.5 C0.88,0.479,0.86,0.458,0.852,0.438 C0.845,0.417,0.849,0.396,0.858,0.375 C0.867,0.354,0.881,0.333,0.888,0.313 C0.896,0.292,0.898,0.271,0.9,0.25 C0.902,0.229,0.904,0.208,0.912,0.188 C0.919,0.167,0.933,0.146,0.942,0.125 C0.951,0.104,0.955,0.083,0.948,0.063 C0.94,0.042,0.92,0.021,0.9,0 C0.88,-0.021,0.86,-0.042,0.852,-0.062 C0.845,-0.083,0.849,-0.104,0.858,-0.125 C0.867,-0.146,0.881,-0.167,0.888,-0.187 C0.896,-0.208,0.898,-0.229,0.9,-0.25 C0.902,-0.271,0.904,-0.292,0.912,-0.312 C0.919,-0.333,0.933,-0.354,0.942,-0.375 C0.951,-0.396,0.955,-0.417,0.948,-0.437 C0.94,-0.458,0.92,-0.479,0.9,-0.5 C0.88,-0.521,0.86,-0.542,0.852,-0.562 C0.845,-0.583,0.849,-0.604,0.858,-0.625 C0.867,-0.646,0.881,-0.667,0.888,-0.687 C0.896,-0.708,0.898,-0.729,0.9,-0.75 C0.902,-0.771,0.904,-0.792,0.912,-0.812 C0.919,-0.833,0.933,-0.854,0.942,-0.875 C0.951,-0.896,0.955,-0.917,0.948,-0.937 C0.94,-0.958,0.92,-0.979,0.9,-1 Z">
-              <animateTransform
-                attributeName="transform"
-                type="translate"
-                from="0 0"
-                to="0 0.5"
-                dur="10s"
-                repeatCount="indefinite"
-              />
-            </path>
-          </clipPath>
-          <filter id="gk-bend" x="-22%" y="-35%" width="155%" height="170%" colorInterpolationFilters="sRGB">
-            <feTurbulence type="turbulence" baseFrequency="0.002 0.038" numOctaves="2" seed="2" stitchTiles="stitch" result="slow" />
-            <feColorMatrix in="slow" type="matrix" values="1 0 0 0 0  0 0 0 0 0.5  0 0 0 0 0.5  0 0 0 1 0" result="slowX" />
-            <feOffset in="slowX" dx="0" dy="0" result="slowF">
-              <animate attributeName="dy" values="0;180" dur="13s" repeatCount="indefinite" />
-            </feOffset>
-            <feTurbulence type="turbulence" baseFrequency="0.008 0.07" numOctaves="1" seed="11" stitchTiles="stitch" result="fast" />
-            <feColorMatrix in="fast" type="matrix" values="1 0 0 0 0  0 0 0 0 0.5  0 0 0 0 0.5  0 0 0 1 0" result="fastX" />
-            <feOffset in="fastX" dx="0" dy="0" result="fastF">
-              <animate attributeName="dy" values="0;110" dur="6.2s" repeatCount="indefinite" />
-            </feOffset>
-            <feComposite in="slowF" in2="fastF" operator="arithmetic" k1="0" k2="0.72" k3="0.28" k4="0" result="mix" />
-            <feGaussianBlur in="mix" stdDeviation="1.6" result="soft" />
-            <feDisplacementMap in="SourceGraphic" in2="soft" scale="12" xChannelSelector="R" yChannelSelector="G" />
-          </filter>
-        </defs>
-      </svg>
       <header className="gks-bar">
         <h1 className="gkh-title">
           <button
@@ -221,8 +205,21 @@ export function SiteHome() {
         </button>
       </header>
       <Hero />
-      <Activities />
-      <Register />
+      <div className="gk-live">
+        <video
+          ref={filmRef}
+          className="gk-live__film"
+          muted
+          loop
+          playsInline
+          preload="none"
+          poster={filmPoster}
+        >
+          <source src={film} type="video/mp4" />
+        </video>
+        <Activities />
+        <Register />
+      </div>
       {gate ? (
         <div className="gkh-gate" onClick={() => setGate(false)}>
           <div
