@@ -1657,6 +1657,7 @@ export type JoinRequest = {
   govtIdUrl: string;
   hasIdPhoto: boolean;
   wantsTrainer: boolean;
+  kind?: 'JOIN' | 'SESSION';
   route: 'TRAINER' | 'STAFF';
   trainerId: string;
   trainerName: string;
@@ -1812,14 +1813,15 @@ export function JoinRequestRecordPage({ route }: { route: 'TRAINER' | 'STAFF' })
           className="gk-btn"
           disabled={busy}
           onClick={() => {
-            if (!paid && !method) {
+            const session = request.kind === 'SESSION';
+            if (!session && !paid && !method) {
               setError('Not paid yet. Pick cash, UPI or card in "Take payment by" on General Information, then approve.');
               return;
             }
-            act('approve', { method, notes }, 'Approved · membership is active');
+            act('approve', { method, notes }, session ? 'Session booked' : 'Approved · membership is active');
           }}
         >
-          Approve
+          {request.kind === 'SESSION' ? 'Approve session' : 'Approve'}
         </button>
       ) : null}
       {open ? (

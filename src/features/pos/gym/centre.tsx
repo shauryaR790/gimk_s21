@@ -1382,12 +1382,12 @@ function JoinRequestsList({ route, embedded = false }: { route: 'TRAINER' | 'STA
         items={rows.map((row) => ({
           id: row.id,
           title: `${row.ref} · ${row.name}`,
-          subtitle: row.sport,
-          meta: row.wantsTrainer ? (row.trainerName || 'Unassigned') : (row.planName || 'No plan yet'),
+          subtitle: row.kind === 'SESSION' ? `${row.sport} session` : row.sport,
+          meta: row.kind === 'SESSION' ? (row.preferredSlotLabel || 'Session') : row.wantsTrainer ? (row.trainerName || 'Unassigned') : (row.planName || 'No plan yet'),
           href: `${base}/${row.id}`,
           when: row.createdAt,
         }))}
-        empty={requests.length ? 'No requests match these filters' : route === 'TRAINER' ? 'No trainer requests yet — they arrive when someone registers with a trainer' : 'No requests yet — they arrive when someone registers on the site'}
+        empty={requests.length ? 'No requests match these filters' : route === 'TRAINER' ? 'No trainer requests yet — they arrive when someone registers with a trainer' : 'No requests yet — they arrive when someone registers or books a session'}
       >
         {(page) => (
       <table className="o-be-table gk-table">
@@ -1397,7 +1397,7 @@ function JoinRequestsList({ route, embedded = false }: { route: 'TRAINER' | 'STA
             <th>Applicant</th>
             <th>Contact</th>
             <th>Sport</th>
-            {route === 'TRAINER' ? <><th>Trainer</th><th>Preferred time</th></> : <th>Government ID</th>}
+            {route === 'TRAINER' ? <><th>Trainer</th><th>Preferred time</th></> : <th>Type</th>}
             <th>Plan</th>
             <th>Status</th>
             <th />
@@ -1409,11 +1409,11 @@ function JoinRequestsList({ route, embedded = false }: { route: 'TRAINER' | 'STA
               <td><strong>{row.ref}</strong><div className="gk-muted">{whenText(row.createdAt)}</div></td>
               <td><strong>{row.name}</strong><div className="gk-muted">{row.age != null ? `${row.age} yrs` : '—'}</div></td>
               <td>{row.mobile}<div className="gk-muted">{row.email}{row.hasPassword ? ' · login set' : ''}{row.hasPortrait ? ' · photo' : ''}</div></td>
-              <td>{row.sport}</td>
+              <td>{row.sport}{row.kind === 'SESSION' && row.preferredSlotLabel ? <div className="gk-muted">{row.preferredSlotLabel}</div> : null}</td>
               {route === 'TRAINER'
                 ? <><td>{row.trainerName || 'Unassigned'}</td><td>{row.preferredSlotLabel || 'No preference'}</td></>
-                : <td>{row.govtIdLabel || '—'}{row.pincode ? <div className="gk-muted">{row.pincode}</div> : null}</td>}
-              <td>{row.planName ? `${row.planName} · ${formatINR(row.amount)}` : 'No plan yet'}<div className="gk-muted">{row.becomeMember ? 'Wants membership' : row.isMember ? 'Says member' : joinPayment(row)}</div></td>
+                : <td>{row.kind === 'SESSION' ? 'Session' : 'Membership'}{row.kind !== 'SESSION' && row.govtIdLabel ? <div className="gk-muted">{row.govtIdLabel}</div> : null}</td>}
+              <td>{row.kind === 'SESSION' ? 'Session request' : row.planName ? `${row.planName} · ${formatINR(row.amount)}` : 'No plan yet'}<div className="gk-muted">{row.kind === 'SESSION' ? (row.preferredSlotLabel || 'Awaiting desk') : row.becomeMember ? 'Wants membership' : row.isMember ? 'Says member' : joinPayment(row)}</div></td>
               <td><span className={`gk-pill is-join-${row.status.toLowerCase()}`}>{JOIN_STATUS[row.status] ?? row.status}</span></td>
               <td className="gk-actions">
                 <a className="gk-btn gk-btn--sm" href={`tel:+91${row.mobile}`} onClick={stop}>Call</a>

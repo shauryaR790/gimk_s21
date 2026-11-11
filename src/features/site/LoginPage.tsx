@@ -66,7 +66,7 @@ export function LoginPage() {
         return;
       }
       saveMemberPass(data.memberToken);
-      navigate(next || '/', { replace: true });
+      navigate(next || '/member', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not sign in.');
     } finally {

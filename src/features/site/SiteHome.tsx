@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { readMemberPass } from '../../lib/memberPass';
 import { SIGNUP_ACTIVITIES } from '../../../shared/activities';
 import film from './assets/bgjimk.mp4';
 import filmPoster from './assets/bgjimk-poster.jpg';
@@ -124,6 +125,7 @@ function Register() {
 }
 
 export function SiteHome() {
+  const navigate = useNavigate();
   const scrollerRef = useRef<HTMLElement>(null);
   const filmRef = useRef<HTMLVideoElement>(null);
   const [gate, setGate] = useState(false);
@@ -200,7 +202,10 @@ export function SiteHome() {
             GYMKHANA
           </button>
         </h1>
-        <button type="button" className="gkh-account" aria-label="Sign in or register" aria-haspopup="dialog" onClick={() => setGate(true)}>
+        <button type="button" className="gkh-account" aria-label="Sign in or register" aria-haspopup="dialog" onClick={() => {
+          if (readMemberPass()) navigate('/member');
+          else setGate(true);
+        }}>
           <img src={orb} alt="" />
         </button>
       </header>

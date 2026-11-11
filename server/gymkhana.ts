@@ -91,6 +91,36 @@ export function readMemberId(header: string | undefined, pass?: string | null) {
   return readMemberPass(decodeURIComponent(match.slice('gym_member='.length)));
 }
 
+function memberIdFrom(req: Request) {
+  const header = req.headers['x-member-pass'];
+  const pass = Array.isArray(header) ? header[0] : header;
+  return readMemberId(req.headers.cookie, pass);
+}
+
+function facilityForSport(sport: string) {
+  const facilities = listFacilities();
+  const needle = sport.trim().toLowerCase();
+  return facilities.find((row) => row.sport.trim().toLowerCase() === needle)
+    ?? facilities.find((row) => listedArenas(row.sport).some((name) => name.toLowerCase() === needle))
+    ?? facilities.find((row) => listedArenas(row.name).some((name) => name.toLowerCase() === needle));
+}
+
+function requestSlotLabel(slot: string) {
+  if (!slot) return '';
+  const ms = Date.parse(slot);
+  if (!Number.isNaN(ms)) {
+    return new Date(ms).toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+  return slotLabel(slot);
+}
+
 function digits(mobile: string) {
   const clean = mobile.replace(/\D/g, '');
   if (clean.length < 10) return '';
@@ -365,6 +395,13 @@ export function memberProfile(customerId: string) {
     'SELECT id, facility_name, kind, fee, payment_status, checked_in_at, checked_out_at FROM check_ins WHERE customer_id = ? ORDER BY checked_in_at DESC LIMIT 500',
     [customerId],
   );
+  const period = get<{ starts_at: string; expires_at: string }>(
+    `SELECT starts_at, expires_at FROM memberships WHERE customer_id = ? AND cafe_id = ? ORDER BY expires_at DESC LIMIT 1`,
+    [customerId, CAFE_ID],
+  );
+  const startsAt = period?.starts_at || member.registeredAt;
+  const expiresAt = member.expiresAt || period?.expires_at || null;
+  const activities = listedArenas(member.accessInterest);
   const today = new Date().toISOString().slice(0, 10);
   const upcoming = bookings.filter((row) => String((row as { start_at: string }).start_at).slice(0, 10) >= today && ['CONFIRMED', 'CHECKED_IN'].includes(String((row as { status: string }).status)));
   const dues = all<{ total: number }>(
@@ -380,7 +417,12 @@ export function memberProfile(customerId: string) {
     .filter((row) => row.status !== 'CANCELLED' && row.status !== 'NO_SHOW')
     .reduce((sum, row) => sum + Math.max(0, Math.round((new Date(row.end_at).getTime() - new Date(row.start_at).getTime()) / 60000)), 0);
   return {
-    member,
+    member: {
+      ...member,
+      startsAt,
+      expiresAt,
+      activities,
+    },
     bookings,
     payments,
     checkIns,
@@ -1790,6 +1832,7 @@ type JoinRow = {
   become_member: number;
   photo_url: string;
   password_hash?: string;
+  kind?: string;
   trainer_name: string | null;
   trainer_phone: string | null;
   plan_name: string | null;
@@ -1832,12 +1875,13 @@ function mapJoin(row: JoinRow, withPhoto = false) {
     govtIdUrl: withPhoto ? row.govt_id_url : '',
     hasIdPhoto: Boolean(row.govt_id_url),
     wantsTrainer: row.wants_trainer === 1,
+    kind: row.kind === 'SESSION' ? 'SESSION' : 'JOIN',
     route: row.wants_trainer === 1 ? 'TRAINER' : 'STAFF',
     trainerId: row.trainer_id,
     trainerName: row.trainer_name ?? '',
     trainerPhone: row.trainer_phone ?? '',
     preferredSlot: row.preferred_slot,
-    preferredSlotLabel: row.preferred_slot ? slotLabel(row.preferred_slot) : '',
+    preferredSlotLabel: row.preferred_slot ? requestSlotLabel(row.preferred_slot) : '',
     planId: row.plan_id,
     planName: row.plan_name ?? '',
     planDays: row.plan_days ?? 0,
@@ -2118,6 +2162,41 @@ export function createJoinRequest(input: JoinInput, actor = 'Website') {
   return publicJoin(row);
 }
 
+export function createSessionRequest(customerId: string, input: { sport?: string; startAt?: string }) {
+  const customer = get<{
+    id: string;
+    name: string;
+    mobile: string;
+    email: string;
+    dob: string;
+    photo_url: string;
+    govt_id_label: string;
+    govt_id_url: string;
+    plan_id: string | null;
+    access_interest: string;
+  }>(
+    'SELECT id, name, mobile, email, dob, photo_url, govt_id_label, govt_id_url, plan_id, access_interest FROM customers WHERE id = ? AND cafe_id = ?',
+    [customerId, CAFE_ID],
+  );
+  if (!customer) throw new AppError(401, 'AUTH', 'Sign in to book a session.');
+  const sport = matchActivity(text(input.sport));
+  if (!sport) throw new AppError(400, 'SPORT', 'Choose an activity.');
+  const start = new Date(String(input.startAt ?? ''));
+  if (Number.isNaN(start.getTime())) throw new AppError(400, 'TIME', 'Choose a date and time.');
+  const stamp = nowIso();
+  const id = randomUUID();
+  const ref = (get<{ n: number | null }>('SELECT MAX(ref_no) AS n FROM join_requests WHERE cafe_id = ?', [CAFE_ID])?.n ?? 0) + 1;
+  const planId = customer.plan_id || 'plan_annual';
+  run(
+    `INSERT INTO join_requests (id, cafe_id, ref_no, sport, name, mobile, email, dob, pincode, govt_id_label, govt_id_url, photo_url, password_hash, wants_trainer, trainer_id, preferred_slot, plan_id, amount, is_member, become_member, kind, customer_id, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, '', 0, '', ?, ?, 0, 1, 0, 'SESSION', ?, 'Session booking', ?, ?)`,
+    [id, CAFE_ID, ref, sport, customer.name, customer.mobile, customer.email, customer.dob, customer.govt_id_label || 'Session', customer.govt_id_url, customer.photo_url, start.toISOString(), planId, customerId, stamp, stamp],
+  );
+  audit('Website', 'SESSION_REQUEST', 'join', id, `${customer.name} · ${sport} · ${requestSlotLabel(start.toISOString())}`);
+  notify('staff', 'New session request', `${joinRef(ref)} · ${customer.name} · ${sport} · ${requestSlotLabel(start.toISOString())}`);
+  return getJoinRequest(id);
+}
+
 export async function startJoinPayment(id: string) {
   const row = joinRow(id);
   if (row.payment_status === 'PAID') throw new AppError(409, 'PAYMENT', 'This request is already paid.');
@@ -2265,6 +2344,27 @@ export function markJoinContacted(id: string, actor: string) {
 export function approveJoinRequest(id: string, method: string | undefined, actor: string, notes?: string) {
   const row = joinRow(id);
   if (!JOIN_OPEN.includes(row.status)) throw new AppError(409, 'REQUEST', 'This request is already closed.');
+  if (row.kind === 'SESSION') {
+    if (!row.customer_id) throw new AppError(400, 'MEMBER', 'This session is not tied to a member.');
+    if (!row.preferred_slot || Number.isNaN(Date.parse(row.preferred_slot))) throw new AppError(400, 'TIME', 'This session has no time.');
+    const facility = facilityForSport(row.sport);
+    if (!facility) throw new AppError(400, 'FACILITY', 'No court is set up for that sport.');
+    const customer = get<{ name: string; mobile: string }>('SELECT name, mobile FROM customers WHERE id = ?', [row.customer_id]);
+    createBooking({
+      facilityId: facility.id,
+      customerId: row.customer_id,
+      memberName: customer?.name || row.name,
+      memberMobile: customer?.mobile || row.mobile,
+      startAt: row.preferred_slot,
+      notes: 'Member session request',
+    }, actor);
+    run(
+      `UPDATE join_requests SET status = 'APPROVED', handled_by = ?, notes = COALESCE(?, notes), updated_at = ? WHERE id = ?`,
+      [actor, notes === undefined ? null : notes.slice(0, 2000), nowIso(), id],
+    );
+    audit(actor, 'SESSION_APPROVED', 'join', id, `${row.sport} · ${requestSlotLabel(row.preferred_slot)}`);
+    return getJoinRequest(id);
+  }
   if (row.wants_trainer === 1 && !row.trainer_id) throw new AppError(400, 'TRAINER', 'Choose a trainer before approving.');
   if (!row.plan_id) throw new AppError(400, 'PLAN', 'Choose a membership plan before approving.');
   if (!row.mobile) throw new AppError(400, 'MOBILE', 'Enter a phone number before approving.');
@@ -2277,7 +2377,7 @@ export function approveJoinRequest(id: string, method: string | undefined, actor
     const customerId = row.payment_status === 'PAID'
       ? ensureJoinCustomer(row, actor)
       : settleJoin(row, pay!, pay === 'CASH' ? 'Cash' : pay === 'UPI' ? 'UPI' : 'Card', '', actor);
-    assignPlan(customerId, row.plan_id, actor);
+    if (!activeMembership(customerId)?.active) assignPlan(customerId, row.plan_id, actor);
     if (row.trainer_id) run('UPDATE customers SET coach_id = ? WHERE id = ?', [row.trainer_id, customerId]);
     run(`UPDATE join_requests SET status = 'APPROVED', customer_id = ?, handled_by = ?, notes = COALESCE(?, notes), updated_at = ? WHERE id = ?`, [customerId, actor, notes === undefined ? null : notes.slice(0, 2000), nowIso(), id]);
   });
@@ -3243,13 +3343,21 @@ export function registerGymRoutes(
   }));
 
   app.get('/api/portal/home', wrap((req, res) => {
-    const customerId = readMemberId(req.headers.cookie);
+    const customerId = memberIdFrom(req);
+    let member = null;
+    if (customerId) {
+      try {
+        member = memberProfile(customerId);
+      } catch {
+        member = null;
+      }
+    }
     res.json({
       plans: listPlans(false),
       facilities: listFacilities(),
       announcements: all('SELECT id, title, body, created_at FROM announcements WHERE cafe_id = ? ORDER BY created_at DESC', [CAFE_ID]),
       classes: all('SELECT id, name, category, schedule, duration_minutes, capacity, price, description, is_private FROM gym_classes WHERE cafe_id = ? AND is_active = 1', [CAFE_ID]),
-      member: customerId ? memberProfile(customerId) : null,
+      member,
       razorpay: Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
     });
   }));
@@ -3345,9 +3453,7 @@ export function registerGymRoutes(
     const row = joinRow(request.id);
     const customerId = ensureJoinCustomer(row, 'Website');
     run('UPDATE join_requests SET customer_id = ?, updated_at = ? WHERE id = ?', [customerId, nowIso(), row.id]);
-    if (!isProduction() && req.body?.demo === true) {
-      assignPlan(customerId, 'plan_monthly', 'Demo');
-    }
+    if (!activeMembership(customerId)?.active) assignPlan(customerId, 'plan_annual', 'Website');
     const memberToken = memberPass(customerId);
     res.setHeader('Set-Cookie', memberCookie(customerId, memberToken));
     res.status(201).json({ request, memberToken });
@@ -3371,8 +3477,14 @@ export function registerGymRoutes(
   app.get('/api/portal/slots', wrap((req, res) => {
     res.json(slotsFor(String(req.query.facilityId ?? ''), String(req.query.date ?? ''), Number(req.query.duration ?? 0)));
   }));
+  app.post('/api/portal/sessions', wrap((req, res) => {
+    const customerId = memberIdFrom(req);
+    if (!customerId) throw new AppError(401, 'AUTH', 'Sign in to book a session.');
+    const request = createSessionRequest(customerId, { sport: String(req.body?.sport ?? ''), startAt: String(req.body?.startAt ?? '') });
+    res.status(201).json({ request, note: 'Request sent to the desk.' });
+  }));
   app.post('/api/portal/bookings', wrap((req, res) => {
-    const customerId = readMemberId(req.headers.cookie);
+    const customerId = memberIdFrom(req);
     if (!customerId) throw new AppError(401, 'AUTH', 'Sign in with your member mobile.');
     const member = get<{ name: string; mobile: string }>('SELECT name, mobile FROM customers WHERE id = ?', [customerId]);
     if (!member) throw new AppError(401, 'AUTH', 'Sign in with your member mobile.');

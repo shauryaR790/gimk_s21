@@ -9,6 +9,7 @@ import ball from './assets/ball.png';
 import curtains from './assets/curtains.jpg';
 import dumbbells from './assets/dumbbells.png';
 import star from './assets/star.png';
+import tiles from './assets/tiles.jpg';
 import { makeDemoMember } from './demoMember';
 import { readFile } from './photo';
 import './register.css';
@@ -45,7 +46,9 @@ export function RegisterPage() {
   const [over, setOver] = useState<Slot | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [filed, setFiled] = useState<Filed | null>(null);
+  const [filed, setFiled] = useState<Filed | null>(() => (
+    import.meta.env.DEV && params.has('done') ? { ref: 'local', wantsTrainer: false } : null
+  ));
   const [demo, setDemo] = useState(false);
 
   useEffect(() => {
@@ -140,11 +143,7 @@ export function RegisterPage() {
         }),
       });
       saveMemberPass(data.memberToken);
-      if (next) {
-        navigate(next, { replace: true });
-        return;
-      }
-      setFiled({ ref: data.request.ref, wantsTrainer: data.request.wantsTrainer });
+      navigate(next || '/member', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not file this.');
     } finally {
@@ -153,7 +152,7 @@ export function RegisterPage() {
   }
 
   return (
-    <main className={`gkf${filed ? ' is-done' : ''}`} style={{ backgroundImage: `url(${curtains})` }}>
+    <main className={`gkf${filed ? ' is-done' : ''}`} style={{ backgroundImage: `url(${filed ? tiles : curtains})` }}>
       {filed ? (
         <section className="gkf-done" aria-live="polite">
           <header className="gkf-done__head">

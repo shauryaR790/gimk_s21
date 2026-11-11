@@ -604,6 +604,7 @@ CREATE TABLE IF NOT EXISTS seed_marks (
   addColumn(database, 'join_requests', 'become_member', 'INTEGER NOT NULL DEFAULT 0');
   addColumn(database, 'join_requests', 'photo_url', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'join_requests', 'password_hash', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'join_requests', 'kind', "TEXT NOT NULL DEFAULT 'JOIN'");
   addColumn(database, 'customers', 'dob', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'bookings', 'created_by', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'check_ins', 'checked_in_by', "TEXT NOT NULL DEFAULT ''");

@@ -1,3 +1,5 @@
+import { readMemberPass } from './memberPass';
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -15,10 +17,12 @@ export class ApiError extends Error {
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
+    const pass = readMemberPass();
     response = await fetch(path, {
       ...init,
       headers: {
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(pass ? { 'X-Member-Pass': pass } : {}),
         ...init?.headers,
       },
       credentials: 'same-origin',

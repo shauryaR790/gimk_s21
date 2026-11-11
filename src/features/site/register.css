@@ -369,6 +369,10 @@ html:has(.gkf)::-webkit-scrollbar,
 .gkf.is-done {
   display: block;
   padding: 0;
+  background-color: #3a0508;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 .gkf-done {

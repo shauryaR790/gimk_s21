@@ -6,6 +6,7 @@ import { ToastHost } from './components/Toast';
 import { LoginPage } from './features/pos/LoginPage';
 import { GatePage } from './features/site/GatePage';
 import { LoginPage as SiteLoginPage } from './features/site/LoginPage';
+import { MemberHome } from './features/site/MemberHome';
 import { RegisterPage } from './features/site/RegisterPage';
 import { SiteHome } from './features/site/SiteHome';
 import { resetScrollLock } from './lib/scrollLock';
@@ -41,6 +42,7 @@ export function App() {
           <Route path="/" element={<SiteHome />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/login" element={<SiteLoginPage />} />
+          <Route path="/member" element={<MemberHome />} />
           <Route path="/in/:sport" element={<GatePage />} />
           <Route path="/pos/login" element={<LoginPage />} />
           <Route path="/pos/*" element={<Suspense fallback={<div className="o-screen-state"><LoadingState label="Loading" /></div>}><PosShell /></Suspense>} />

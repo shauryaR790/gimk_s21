@@ -540,6 +540,11 @@ const deskApproved = gym.approveJoinRequest(deskJoin.id, 'CASH', 'desk');
 assert.equal(deskApproved.status, 'APPROVED');
 assert.equal(deskApproved.paymentStatus, 'PAID');
 assert.equal(gym.memberProfile(deskApproved.customerId).member.membershipStatus, 'ACTIVE');
+const sessionAt = new Date('2027-08-20T09:00:00+05:30').toISOString();
+const sessionReq = gym.createSessionRequest(deskApproved.customerId, { sport: 'Badminton', startAt: sessionAt });
+assert.equal(sessionReq.kind, 'SESSION');
+assert.equal(sessionReq.sport, 'Badminton');
+assert.equal(gym.approveJoinRequest(sessionReq.id, undefined, 'desk').status, 'APPROVED');
 
 const trainerJoin = gym.createJoinRequest({ ...joinBase, sport: 'Badminton', name: 'Ira Sen', mobile: '9876543211', wantsTrainer: true, trainerId: 'trainer_head', preferredSlot: 'Mon 07:00', planId: 'plan_quarterly' });
 assert.equal(gym.getJoinRequest(trainerJoin.id).route, 'TRAINER');
