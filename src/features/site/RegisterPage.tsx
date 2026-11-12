@@ -164,7 +164,7 @@ export function RegisterPage() {
       {filed ? (
         <DoneScreen
           copy="Your registration process has been Completed you will receive the final confirmation with login credentials on your registered mail id"
-          onContinue={() => navigate(next || '/member', { replace: true })}
+          onContinue={() => navigate(next.startsWith('/in') ? '/member' : (next || '/member'), { replace: true })}
         />
       ) : (
       <div className="gkf-sheet">

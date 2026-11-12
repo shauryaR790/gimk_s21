@@ -86,9 +86,14 @@ export function readMemberId(header: string | undefined, pass?: string | null) {
   const fromPass = readMemberPass(pass);
   if (fromPass) return fromPass;
   if (!header) return null;
-  const match = header.split(';').map((part) => part.trim()).find((part) => part.startsWith('gym_member='));
-  if (!match) return null;
-  return readMemberPass(decodeURIComponent(match.slice('gym_member='.length)));
+  const parts = header.split(';').map((part) => part.trim());
+  for (const name of ['gym_member=', 'gk_member_client=']) {
+    const match = parts.find((part) => part.startsWith(name));
+    if (!match) continue;
+    const id = readMemberPass(decodeURIComponent(match.slice(name.length)));
+    if (id) return id;
+  }
+  return null;
 }
 
 function memberIdFrom(req: Request) {
@@ -3693,11 +3698,24 @@ export function registerGymRoutes(
     );
     res.json(memberProfile(customerId));
   }));
+  app.get('/api/portal/session', wrap((req, res) => {
+    const customerId = memberIdFrom(req);
+    if (!customerId) {
+      res.json({ ok: false, memberToken: null });
+      return;
+    }
+    const memberToken = memberPass(customerId);
+    res.setHeader('Set-Cookie', memberCookie(customerId, memberToken));
+    res.json({ ok: true, memberToken });
+  }));
   app.post('/api/portal/gate', wrap((req, res) => {
     const incoming = typeof req.body?.memberToken === 'string' ? req.body.memberToken : '';
+    const header = req.headers['x-member-pass'];
+    const headerPass = Array.isArray(header) ? header[0] : header;
+    const pass = incoming || headerPass || '';
     const activity = typeof req.body?.activity === 'string' ? req.body.activity : '';
-    const result = scanActivityGate(activity, req.headers.cookie, incoming);
-    const customerId = readMemberId(req.headers.cookie, incoming);
+    const result = scanActivityGate(activity, req.headers.cookie, pass);
+    const customerId = readMemberId(req.headers.cookie, pass) || memberIdFrom(req);
     const memberToken = customerId ? memberPass(customerId) : '';
     if (customerId) res.setHeader('Set-Cookie', memberCookie(customerId, memberToken));
     res.json({ ...result, memberToken });

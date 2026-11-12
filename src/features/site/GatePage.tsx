@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ARENA_SPORTS, arenaSlug, sportFromSlug } from '../../../shared/activities';
 import { ApiError, api } from '../../lib/api';
 import { readMemberPass, saveMemberPass } from '../../lib/memberPass';
@@ -8,7 +8,6 @@ import './register.css';
 
 type GateState =
   | { kind: 'working' }
-  | { kind: 'in'; name: string; sport: string; facility: string; already: boolean; door: boolean }
   | { kind: 'auth'; sport: string; door: boolean }
   | { kind: 'error'; message: string };
 
@@ -24,6 +23,17 @@ type GateResult = {
 };
 
 const gateScan = new Map<string, Promise<GateResult>>();
+
+async function restorePass() {
+  if (readMemberPass()) return readMemberPass();
+  try {
+    const session = await api<{ memberToken?: string | null }>('/api/portal/session');
+    saveMemberPass(session.memberToken);
+  } catch {
+    /* stay signed out */
+  }
+  return readMemberPass();
+}
 
 function scanGate(activity: string) {
   const key = activity || 'door';
@@ -43,11 +53,12 @@ function scanGate(activity: string) {
 }
 
 export function GatePage() {
+  const navigate = useNavigate();
   const { sport: slug = '' } = useParams();
   const sport = sportFromSlug(slug) || ARENA_SPORTS.find((name) => name.toLowerCase() === slug.toLowerCase()) || '';
   const door = !slug;
   const [state, setState] = useState<GateState>({ kind: 'working' });
-  const next = door ? '/in' : `/in/${sport ? arenaSlug(sport) : slug}`;
+  const next = '/member';
 
   useEffect(() => {
     document.title = door ? 'Door · Gymkhana' : sport ? `${sport} · Gymkhana` : 'Gate · Gymkhana';
@@ -67,16 +78,10 @@ export function GatePage() {
     let cancel = false;
     void (async () => {
       try {
-        const data = await scanGate(sport);
+        await restorePass();
+        await scanGate(sport);
         if (cancel) return;
-        setState({
-          kind: 'in',
-          name: data.name,
-          sport: data.activity || data.sport,
-          facility: data.facility || data.sport,
-          already: Boolean(data.already),
-          door: Boolean(data.door) || door,
-        });
+        navigate('/member', { replace: true });
       } catch (err) {
         if (cancel) return;
         if (err instanceof ApiError && err.status === 401) {
@@ -89,7 +94,7 @@ export function GatePage() {
     return () => {
       cancel = true;
     };
-  }, [door, sport]);
+  }, [door, navigate, sport]);
 
   return (
     <main className="gkf is-login">
@@ -100,25 +105,13 @@ export function GatePage() {
           <h1>{door ? 'DOOR' : sport || 'GATE'}</h1>
         </header>
         {state.kind === 'working' ? <p className="gkg-copy">Checking you in…</p> : null}
-        {state.kind === 'in' ? (
-          <p className="gkg-copy">
-            {state.already
-              ? `${state.name}, you are already in.`
-              : `${state.name}, you are in.`}
-            {' '}
-            {state.sport ? `Activity: ${state.sport}.` : null}
-            {' '}
-            {state.facility ? `Facility: ${state.facility}.` : null}
-            {' '}You show on the In now list at the desk.
-          </p>
-        ) : null}
         {state.kind === 'auth' ? (
           <>
             <p className="gkg-copy">
               Register once on this phone. After that, scan the door QR with your camera.
             </p>
             <div className="gkg-actions gkg-actions--foot">
-              <Link className="gkg-alt" to={`/login?next=${encodeURIComponent(next)}`}>Different phone?</Link>
+              <Link className="gkg-alt" to={`/login?next=${encodeURIComponent(next)}`}>Already registered? Login</Link>
               <Link
                 className="gkf-confirm"
                 to={`/register?${state.sport ? `activity=${encodeURIComponent(state.sport)}&` : ''}next=${encodeURIComponent(next)}`}
