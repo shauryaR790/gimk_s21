@@ -79,9 +79,18 @@ export function GatePage() {
     void (async () => {
       try {
         await restorePass();
-        await scanGate(sport);
+        const data = await scanGate(sport);
         if (cancel) return;
-        navigate('/member', { replace: true });
+        navigate('/member', {
+          replace: true,
+          state: {
+            checkIn: {
+              name: data.name,
+              already: Boolean(data.already),
+              sport: data.activity || data.sport || sport || undefined,
+            },
+          },
+        });
       } catch (err) {
         if (cancel) return;
         if (err instanceof ApiError && err.status === 401) {

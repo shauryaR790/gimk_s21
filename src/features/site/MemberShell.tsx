@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { clearMemberPass } from '../../lib/memberPass';
+import { CheckInToast, type CheckInToastInfo } from './CheckInToast';
 import { SilkFilm } from './silk';
 import './done.css';
 import './site.css';
@@ -51,11 +52,15 @@ const LINKS = [
   { to: '/member/report', label: 'Report', end: false },
 ];
 
+type LocState = { checkIn?: CheckInToastInfo };
+
 export function MemberShell() {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
   const [home, setHome] = useState<Home | null>(null);
   const [menu, setMenu] = useState(false);
+  const [checkIn, setCheckIn] = useState<CheckInToastInfo | null>(null);
 
   useEffect(() => {
     document.title = 'Gymkhana';
@@ -66,6 +71,13 @@ export function MemberShell() {
       document.body.classList.remove('gkm-page');
     };
   }, []);
+
+  useEffect(() => {
+    const state = location.state as LocState | null;
+    if (!state?.checkIn) return;
+    setCheckIn(state.checkIn);
+    navigate(pathname, { replace: true, state: null });
+  }, [location.state, navigate, pathname]);
 
   useEffect(() => {
     setMenu(false);
@@ -102,8 +114,9 @@ export function MemberShell() {
   const member = home?.member?.member;
   if (!member) {
     return (
-      <main className="gkm">
+      <main className={`gkm${checkIn ? ' is-cin' : ''}`}>
         <SilkFilm className="gkm-film" />
+        {checkIn ? <CheckInToast info={checkIn} onDone={() => setCheckIn(null)} /> : null}
       </main>
     );
   }
@@ -116,8 +129,9 @@ export function MemberShell() {
   };
 
   return (
-    <main className={`gkm${menu ? ' is-menu' : ''}`}>
+    <main className={`gkm${menu ? ' is-menu' : ''}${checkIn ? ' is-cin' : ''}`}>
       <SilkFilm className="gkm-film" />
+      {checkIn ? <CheckInToast info={checkIn} onDone={() => setCheckIn(null)} /> : null}
       <button
         type="button"
         className="gkm-burger"
