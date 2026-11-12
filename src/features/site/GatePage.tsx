@@ -115,16 +115,16 @@ export function GatePage() {
         {state.kind === 'auth' ? (
           <>
             <p className="gkg-copy">
-              Register once on this phone. After that, scan the door QR with your camera — you are in. No login every time.
+              Register once on this phone. After that, scan the door QR with your camera.
             </p>
-            <div className="gkg-actions">
+            <div className="gkg-actions gkg-actions--foot">
+              <Link className="gkg-alt" to={`/login?next=${encodeURIComponent(next)}`}>Different phone?</Link>
               <Link
                 className="gkf-confirm"
                 to={`/register?${state.sport ? `activity=${encodeURIComponent(state.sport)}&` : ''}next=${encodeURIComponent(next)}`}
               >
                 Register once
               </Link>
-              <Link className="gkg-alt" to={`/login?next=${encodeURIComponent(next)}`}>Different phone?</Link>
             </div>
           </>
         ) : null}

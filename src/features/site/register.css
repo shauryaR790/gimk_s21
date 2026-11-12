@@ -550,8 +550,15 @@ html:has(.gkf) *::-webkit-scrollbar {
   gap: 12px;
 }
 
+.gkg-actions--foot {
+  margin-top: auto;
+  padding-bottom: 8px;
+}
+
 .gkg-actions .gkf-confirm {
   display: block;
+  width: 100%;
+  text-align: center;
 }
 
 .gkg-alt {
