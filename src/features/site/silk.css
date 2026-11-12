@@ -11,7 +11,13 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: 50% 42%;
+  object-position: 50% 50%;
+}
+
+/* p3 flipped copy — same video, mirrored vertically */
+.gk-silk--mirror .gk-silk__film {
+  transform: scaleY(-1);
+  transform-origin: 50% 50%;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -20,6 +26,10 @@
   }
 
   .gk-silk {
-    background: #6a1a12 url('./assets/bgjimk-poster.jpg') 50% 42% / cover no-repeat;
+    background: #6a1a12 url('./assets/crimson-bg.jpg') 50% 42% / cover no-repeat;
+  }
+
+  .gk-silk--mirror {
+    background: #6a1a12 url('./assets/crimson-bg.jpg') 50% 58% / cover no-repeat;
   }
 }

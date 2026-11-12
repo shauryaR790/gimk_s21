@@ -64,9 +64,10 @@ export function MemberBookings() {
 
   return (
     <section className="gkm-sheet">
-      <h1>BOOKINGS</h1>
+      <p className="gkm-brand">GYMKHANA<br /><span>SECTOR 19</span></p>
       <form className="gkm-form" onSubmit={(event) => void send(event)}>
         <div className="gkm-sheet__card">
+          <h1>BOOKINGS</h1>
           <div className="gkm-field">
             <span>Venue</span>
             <Dropdown label="Venue" placeholder="Basketball, badminton, courts…" value={venue} options={venues} onChange={setVenue} />
@@ -100,8 +101,8 @@ export function MemberBookings() {
             />
           </label>
           {error ? <p className="gkm-error" role="alert">{error}</p> : null}
+          <button type="submit" className="gkm-submit" disabled={busy}>{busy ? 'SENDING' : 'SUBMIT'}</button>
         </div>
-        <button type="submit" className="gkm-submit" disabled={busy}>{busy ? 'SENDING' : 'SUBMIT'}</button>
       </form>
     </section>
   );

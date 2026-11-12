@@ -49,20 +49,33 @@ export function MemberReport() {
 
   return (
     <section className="gkm-sheet">
-      <h1>REPORT</h1>
+      <p className="gkm-brand">GYMKHANA<br /><span>SECTOR 19</span></p>
       <form className="gkm-form" onSubmit={(event) => void send(event)}>
         <div className="gkm-sheet__card">
+          <h1>REPORT</h1>
           <label className="gkm-field">
             <span>Specify the issue</span>
-            <textarea value={issue} rows={5} onChange={(event) => setIssue(event.target.value.slice(0, 800))} />
+            <input
+              type="text"
+              value={issue}
+              maxLength={800}
+              autoComplete="off"
+              onChange={(event) => setIssue(event.target.value)}
+            />
           </label>
           <label className="gkm-field">
             <span>Remarks</span>
-            <textarea value={remarks} rows={3} onChange={(event) => setRemarks(event.target.value.slice(0, 400))} />
+            <input
+              type="text"
+              value={remarks}
+              maxLength={400}
+              autoComplete="off"
+              onChange={(event) => setRemarks(event.target.value)}
+            />
           </label>
           {error ? <p className="gkm-error" role="alert">{error}</p> : null}
+          <button type="submit" className="gkm-submit" disabled={busy}>{busy ? 'SENDING' : 'SUBMIT'}</button>
         </div>
-        <button type="submit" className="gkm-submit" disabled={busy}>{busy ? 'SENDING' : 'SUBMIT'}</button>
       </form>
     </section>
   );

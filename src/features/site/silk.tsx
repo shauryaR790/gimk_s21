@@ -1,16 +1,19 @@
 import { useEffect, useRef } from 'react';
-import film from './assets/bgjimk.mp4';
-import filmPoster from './assets/bgjimk-poster.jpg';
+import film from './assets/wavy.mp4';
+import filmPoster from './assets/crimson-bg.jpg';
 import './silk.css';
 
 export function SilkFilm({
   active = true,
   className,
   startAt = 0,
+  variant = 'default',
 }: {
   active?: boolean;
   className?: string;
   startAt?: number;
+  /** Mirrored copy for p3 — same film, flipped vertically. */
+  variant?: 'default' | 'mirror';
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const filmRef = useRef<HTMLVideoElement>(null);
@@ -43,7 +46,9 @@ export function SilkFilm({
   return (
     <div
       ref={wrapRef}
-      className={['gk-silk', className].filter(Boolean).join(' ')}
+      className={['gk-silk', variant === 'mirror' ? 'gk-silk--mirror' : '', className]
+        .filter(Boolean)
+        .join(' ')}
       aria-hidden="true"
     >
       <video

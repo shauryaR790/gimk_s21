@@ -2,14 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { readMemberPass } from '../../lib/memberPass';
 import { SIGNUP_ACTIVITIES } from '../../../shared/activities';
-import ball from './assets/ball.png';
-import dumbbells from './assets/dumbbells.png';
-import grain from './assets/grain-rect.png';
 import grid from './assets/grid.jpg';
 import orb from './assets/orb.png';
-import queen from './assets/queen.png';
 import star from './assets/star.png';
-import stripes from './assets/stripes.png';
 import { SilkFilm } from './silk';
 import './site.css';
 
@@ -106,13 +101,9 @@ function Activities() {
       ref={ref}
       id="activities"
       className={`gka${inView ? ' is-in' : ''}`}
-      style={{ backgroundImage: `url(${grain})` }}
     >
-      <div className="gka-stripes" style={{ backgroundImage: `url(${stripes})` }} />
-      <div className="gka-bar" />
-      <img className="gka-queen" src={queen} alt="" />
-      <img className="gka-ball" src={ball} alt="" />
-      <img className="gka-dumbbells" src={dumbbells} alt="" />
+      <SilkFilm className="gka-film" />
+      <p className="gka-mark">GYMKHANA</p>
       <h2 className="gka-title">ACTIVITIES</h2>
       <ul className="gka-list">
         {ACTIVITIES.map((name, index) => {
@@ -143,17 +134,13 @@ function Register() {
   const [ref, inView] = useInView<HTMLElement>();
   return (
     <section ref={ref} id="register" className={`gkr${inView ? ' is-in' : ''}`}>
-      <SilkFilm className="gkr-film" startAt={5.4} />
-      <div className="gkr-core">
-        <h2 className="gkr-title">GYMKHANA</h2>
-        <p className="gkr-sector">SECTOR 19</p>
-        <img className="gkr-star" src={star} alt="" />
-        <Link className="gkr-cta" to="/register">REGISTER<br />NOW</Link>
-      </div>
-      <p className="gkr-contact">
-        <a className="gkr-phone" href="tel:+911010100001">+91 10101 00001</a>
-        <a className="gkr-mail" href="mailto:Contact@gymkhana.com">Contact@gymkhana.com</a>
-      </p>
+      <SilkFilm className="gkr-film" variant="mirror" />
+      <h2 className="gkr-title">GYMKHANA</h2>
+      <p className="gkr-sector">SECTOR 19</p>
+      <img className="gkr-star" src={star} alt="" />
+      <Link className="gkr-cta" to="/register">REGISTER<br />NOW</Link>
+      <a className="gkr-phone" href="tel:+911010100001">+91 10101 00001</a>
+      <a className="gkr-mail" href="mailto:Contact@gymkhana.com">Contact@gymkhana.com</a>
     </section>
   );
 }
@@ -175,29 +162,93 @@ export function SiteHome() {
     const root = scrollerRef.current;
     if (!root) return;
     let frame = 0;
+    let heroLatched = false;
+    let regLatched = false;
+    let regDisplay = 0;
+    let regTick = 0;
+    let snapping = false;
+
+    const writeReg = (value: number) => {
+      regDisplay = value;
+      root.style.setProperty('--reg', value.toFixed(4));
+      root.classList.toggle('is-docked', heroLatched && value < 0.02);
+      root.classList.toggle('is-reg', value > 0.92);
+    };
+
+    const easeRegTo = (target: number) => {
+      if (regTick) window.cancelAnimationFrame(regTick);
+      root.classList.add('is-reg-snap');
+      const step = () => {
+        const delta = target - regDisplay;
+        if (Math.abs(delta) < 0.002) {
+          writeReg(target);
+          regTick = 0;
+          return;
+        }
+        writeReg(regDisplay + delta * 0.18);
+        regTick = window.requestAnimationFrame(step);
+      };
+      regTick = window.requestAnimationFrame(step);
+    };
+
     const update = () => {
       frame = 0;
-      const origin = root.getBoundingClientRect().top;
-      const yOf = (el: Element) => root.scrollTop + (el.getBoundingClientRect().top - origin);
+      const y = root.scrollTop;
       const hero = root.querySelector('.gkh');
       const range = hero instanceof HTMLElement
         ? Math.max(1, hero.offsetHeight)
         : root.clientHeight;
-      const heroT = Math.min(1, Math.max(0, root.scrollTop / (range * 0.8)));
-      const next = heroT * heroT * (3 - 2 * heroT);
-      const blendT = Math.min(1, Math.max(0, (root.scrollTop - range * 0.8) / (range * 0.2)));
+      // Latch docked once past hero so Activities never undocks / bounces the title.
+      if (y >= range * 0.88) heroLatched = true;
+      if (y < range * 0.45) heroLatched = false;
+      let next: number;
+      if (heroLatched) {
+        next = 1;
+      } else {
+        const heroT = Math.min(1, Math.max(0, y / (range * 0.8)));
+        next = heroT * heroT * (3 - 2 * heroT);
+      }
+      const blendT = Math.min(1, Math.max(0, (y - range * 0.8) / (range * 0.2)));
       const blend = blendT * blendT * blendT * (blendT * (blendT * 6 - 15) + 10);
       const register = root.querySelector('.gkr');
-      let reg = 0;
-      if (register instanceof HTMLElement) {
-        const top = yOf(register);
-        const t = Math.min(1, Math.max(0, (root.scrollTop + root.clientHeight - top) / Math.max(1, root.clientHeight)));
-        reg = t * t * (3 - 2 * t);
+      const maxScroll = Math.max(1, root.scrollHeight - root.clientHeight);
+      const end = register instanceof HTMLElement
+        ? Math.min(register.offsetTop, maxScroll)
+        : maxScroll;
+      // Near the bottom: auto-slide into p3 and expand the title — no fine scroll needed.
+      const engage = end - root.clientHeight * 0.28;
+      const release = end - root.clientHeight * 0.55;
+      if (!regLatched && y >= engage) {
+        regLatched = true;
+        snapping = true;
+        easeRegTo(1);
+        root.scrollTo({ top: maxScroll, behavior: 'smooth' });
+        window.setTimeout(() => {
+          snapping = false;
+        }, 700);
+      } else if (regLatched && y < release) {
+        regLatched = false;
+        root.classList.remove('is-reg-snap');
+        easeRegTo(0);
       }
+
+      if (!regLatched && !regTick) {
+        const lead = Math.min(Math.max(root.clientHeight * 0.35, 100), end);
+        const start = Math.max(0, end - lead);
+        let reg = 0;
+        if (y > start) {
+          const t = Math.min(1, Math.max(0, (y - start) / Math.max(1, end - start)));
+          reg = t * t * (3 - 2 * t);
+        }
+        writeReg(reg);
+      } else if (regLatched && !regTick) {
+        writeReg(1);
+      }
+
       root.style.setProperty('--hero', next.toFixed(4));
       root.style.setProperty('--blend', blend.toFixed(4));
-      root.style.setProperty('--reg', reg.toFixed(4));
-      root.classList.toggle('is-docked', next >= 0.92 && reg < 0.08);
+      root.classList.toggle('is-away', next >= 0.5);
+      if (snapping && Math.abs(y - maxScroll) < 1) snapping = false;
     };
     const onScroll = () => {
       if (!frame) frame = window.requestAnimationFrame(update);
@@ -207,6 +258,7 @@ export function SiteHome() {
     window.addEventListener('resize', onScroll);
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
+      if (regTick) window.cancelAnimationFrame(regTick);
       root.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
     };
