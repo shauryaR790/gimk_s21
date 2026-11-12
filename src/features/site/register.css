@@ -26,22 +26,35 @@ body:has(.gkf) {
 
 html.gkf-page::-webkit-scrollbar,
 body.gkf-page::-webkit-scrollbar,
+html.gkf-page #root::-webkit-scrollbar,
 html:has(.gkf)::-webkit-scrollbar,
-.gkf::-webkit-scrollbar {
+.gkf::-webkit-scrollbar,
+html.gkf-page *::-webkit-scrollbar,
+html:has(.gkf) *::-webkit-scrollbar {
   display: none !important;
   width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
 }
 
 .gkf {
-  --paper: #f4f4f4;
+  --paper: #ffffff;
   --ink: #111;
-  --mute: rgba(244, 244, 244, 0.62);
-  --serif: Palatino, 'Palatino Linotype', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
+  --mute: rgba(255, 255, 255, 0.62);
+  --sand: #cbac8e;
+  --serif: Piazzolla, Palatino, 'Palatino Linotype', Georgia, 'Times New Roman', serif;
+  position: relative;
   min-height: 100dvh;
   padding: 28px 22px 48px;
-  background: #090000 center / cover no-repeat;
+  background: #1e1e1e;
   color: var(--paper);
   font-family: var(--serif);
+}
+
+.gkf-film {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
 }
 
 .gkf-sheet {
@@ -54,7 +67,6 @@ html:has(.gkf)::-webkit-scrollbar,
 .gkf-head {
   position: relative;
   margin: 8px 0 28px;
-  padding-right: 52px;
 }
 
 .gkf-mark {
@@ -64,7 +76,7 @@ html:has(.gkf)::-webkit-scrollbar,
   font-family: 'Pillar', 'Anton', sans-serif;
   font-size: 34px;
   font-weight: 400;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
   line-height: 0.82;
   text-decoration: none;
 }
@@ -73,9 +85,9 @@ html:has(.gkf)::-webkit-scrollbar,
   margin: 8px 0 0;
   color: var(--paper);
   font-family: 'Pillar', 'Anton', sans-serif;
-  font-size: clamp(114px, 32vw, 132px);
+  font-size: clamp(72px, 22vw, 132px);
   font-weight: 400;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.05em;
   line-height: 0.82;
 }
 
@@ -127,26 +139,39 @@ html:has(.gkf)::-webkit-scrollbar,
 }
 
 .gkf-field > span {
-  color: var(--paper);
-  font-family: var(--serif);
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: 0;
+  color: #ffffff;
+  font-family: Piazzolla, Palatino, Georgia, serif;
+  font-size: clamp(22px, 6vw, 32px);
+  font-weight: 400;
+  letter-spacing: 0.05em;
   line-height: 1.1;
+}
+
+.gkf-hint {
+  margin: 0;
+  color: rgba(244, 244, 244, 0.72);
+  font-family: var(--serif);
+  font-size: 13px;
+  line-height: 1.3;
 }
 
 .gkf-field input,
 .gkf-drop {
   width: 100%;
   margin: 0;
-  border: 0;
+  border: 1px solid rgb(255 255 255 / 0.22);
   border-radius: 999px;
-  background: #fff;
-  color: #000;
-  font-family: var(--serif);
+  background: rgb(203 172 142 / 0.28);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25);
+  backdrop-filter: blur(16px) saturate(1.25);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.28),
+    0 8px 24px rgb(0 0 0 / 0.18);
+  color: #fff8ee;
+  font-family: Piazzolla, Palatino, Georgia, serif;
   font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  font-weight: 400;
+  letter-spacing: 0.03em;
   line-height: 1.2;
   appearance: none;
   -webkit-appearance: none;
@@ -178,18 +203,18 @@ html:has(.gkf)::-webkit-scrollbar,
   border: 0;
   border-radius: 999px;
   background: none;
-  color: #111;
+  color: #fff8ee;
   cursor: pointer;
   transform: translateY(-50%);
 }
 
 .gkf-secret__eye:focus-visible {
-  outline: 2px solid #111;
+  outline: 2px solid #fff;
   outline-offset: 0;
 }
 
 .gkf-field input::placeholder {
-  color: #999;
+  color: rgb(255 248 238 / 0.55);
   font-weight: 400;
 }
 
@@ -212,28 +237,33 @@ html:has(.gkf)::-webkit-scrollbar,
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  height: 34px;
+  height: 42px;
   padding: 0 16px 0 18px;
-  border: 0;
+  border: 1px solid rgb(255 255 255 / 0.22);
   border-radius: 999px;
-  background: #fff;
-  color: #000;
-  font-family: var(--serif);
+  background: rgb(203 172 142 / 0.28);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25);
+  backdrop-filter: blur(16px) saturate(1.25);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.28),
+    0 8px 24px rgb(0 0 0 / 0.18);
+  color: #fff8ee;
+  font-family: Piazzolla, Palatino, Georgia, serif;
   font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  font-weight: 400;
+  letter-spacing: 0.03em;
   text-align: left;
   cursor: pointer;
 }
 
 .gkf .gk-dd__value.is-placeholder {
-  color: #9a9a9a;
+  color: rgb(255 248 238 / 0.55);
   font-weight: 400;
 }
 
 .gkf .gk-dd__btn svg {
   flex: none;
-  color: #111;
+  color: #fff8ee;
 }
 
 .gkf .gk-dd.is-open .gk-dd__btn svg {
@@ -284,12 +314,12 @@ html:has(.gkf)::-webkit-scrollbar,
 .gkf-drop em {
   overflow: hidden;
   max-width: 100%;
-  font-family: var(--serif);
+  font-family: Piazzolla, Palatino, Georgia, serif;
   font-size: 16px;
   font-style: normal;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  color: #9a9a9a;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  color: rgb(255 248 238 / 0.62);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -315,7 +345,7 @@ html:has(.gkf)::-webkit-scrollbar,
 }
 
 .gkf-drop.is-held em {
-  color: #000;
+  color: #fff8ee;
 }
 
 .gkf-error {
@@ -354,7 +384,7 @@ html:has(.gkf)::-webkit-scrollbar,
   font-family: 'Pillar', 'Anton', sans-serif;
   font-size: clamp(52px, 14vw, 72px);
   font-weight: 400;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   line-height: 0.9;
   text-align: center;
   text-decoration: none;
@@ -369,13 +399,12 @@ html:has(.gkf)::-webkit-scrollbar,
 .gkf.is-done {
   display: block;
   padding: 0;
-  background-color: #3a0508;
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
+  background: #1e1e1e;
 }
 
 .gkf-done {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -391,7 +420,7 @@ html:has(.gkf)::-webkit-scrollbar,
 }
 
 .gkf-done__mark {
-  color: #c4121a;
+  color: #fff;
   font-family: 'Pillar', 'Anton', sans-serif;
   font-size: clamp(64px, 18vw, 108px);
   font-weight: 400;
@@ -402,12 +431,25 @@ html:has(.gkf)::-webkit-scrollbar,
 
 .gkf-done__sector {
   margin: 0;
-  color: #c4121a;
+  color: #fff;
   font-family: 'Pillar', 'Anton', sans-serif;
   font-size: clamp(18px, 5vw, 28px);
   font-weight: 400;
   letter-spacing: 0.16em;
   line-height: 1;
+}
+
+.gkf-done__go {
+  margin: 18px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+  font-family: 'Pillar', 'Anton', sans-serif;
+  font-size: clamp(28px, 8vw, 42px);
+  letter-spacing: 0.08em;
+  line-height: 0.9;
+  cursor: pointer;
 }
 
 .gkf-done__star {
@@ -470,9 +512,10 @@ html:has(.gkf)::-webkit-scrollbar,
 }
 
 .gkf.is-login .gkf-field > span {
-  color: rgba(244, 244, 244, 0.78);
-  font-size: 16px;
+  color: #ffffff;
+  font-size: clamp(22px, 6vw, 32px);
   font-weight: 400;
+  letter-spacing: 0.05em;
 }
 
 .gkf.is-login .gkf-field input,

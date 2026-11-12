@@ -5,7 +5,7 @@ import { formatINR } from '../../../../shared/domain';
 import { ARENA_SLOTS, arenaSlug } from '../../../../shared/activities';
 import { priorityLabel } from '../../../../shared/maintenance';
 import { api } from '../../../lib/api';
-import { printActivityQr } from '../../../lib/printQr';
+import { printActivityQr, printDoorQr } from '../../../lib/printQr';
 import { useTitle } from '../../../lib/useTitle';
 import { pushToast } from '../../../components/Toast';
 import { getDeskMode } from '../staffSession';
@@ -13,6 +13,7 @@ import { ChromePagerTools, type BackendChromeContext } from '../odoo/OdooBackend
 import { ChromeRecords, type BoardItem } from '../odoo/chrome';
 import { BOOKING_STAGES, BOOKING_STATUS, BookingStages, bookingStageClass, Dropdown, describeAction, whenText } from './record';
 import { JOIN_STATUS, joinPayment, type JoinRequest } from './forms';
+import { SlotGrid, type HeldSlot } from './slots';
 import { stashSelectedMembers } from './comms';
 
 type Member = {
@@ -348,7 +349,20 @@ export function MembersPage() {
         onAdd={() => navigate(tab === 'plans' ? '/pos/backend/plans/new' : '/pos/backend/people/new')}
         onImported={people.reload}
       />
-      {tab !== 'plans' ? (
+      {tab === 'in' ? (
+        <div className="gk-toolbar" style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            className="gk-btn gk-btn--primary"
+            onClick={() => {
+              void printDoorQr().catch((err: unknown) => pushToast(err instanceof Error ? err.message : 'Could not print the QR.'));
+            }}
+          >
+            Print QR
+          </button>
+        </div>
+      ) : null}
+      {tab !== 'plans' && tab !== 'in' ? (
         <div className="gk-comms-filters">
           <Dropdown label="Audience" value={extraFilter} options={MEMBER_WA_FILTERS} onChange={(value) => { setExtraFilter(value); setPicked([]); }} />
           <Dropdown label="Sport" value={sport} options={[{ value: '', label: 'Any sport' }, ...sports.map((row) => ({ value: row, label: row }))]} onChange={setSport} />
@@ -411,61 +425,95 @@ export function MembersPage() {
           items={members.map((member) => ({
             id: member.id,
             title: member.name,
-            subtitle: `${member.mobile} ${member.memberCode} ${member.govtIdLabel ?? ''} ${member.hereSport || member.hereNow || ''} ${member.consentStatus ?? ''}`,
-            meta: member.hereNow ? `In ${member.hereSport || member.hereNow}` : member.planName || member.membershipStatus,
+            subtitle: `${member.mobile} ${member.memberCode} ${member.govtIdLabel ?? ''} ${member.accessInterest || ''} ${member.hereSport || member.hereNow || ''} ${member.consentStatus ?? ''}`,
+            meta: member.hereNow
+              ? `${member.hereSport || member.accessInterest || 'In'} · ${member.hereNow}`
+              : member.planName || member.membershipStatus,
             href: `/pos/backend/people/${member.id}`,
             when: member.lastInAt || undefined,
           }))}
-          empty={tab === 'in' ? 'No one is in yet — they appear here after they scan the court QR' : 'No members yet — add one from this page'}
+          empty={tab === 'in' ? 'No one is in yet — they appear here after they scan the door QR' : 'No members yet — add one from this page'}
         >
           {(page) => (
             <table className="o-be-table gk-table">
               <thead>
                 <tr>
-                  <th />
-                  <th>Name</th>
-                  <th>Phone</th>
-                  <th>Email</th>
-                  <th>Member ID</th>
-                  <th>Plan</th>
-                  <th>Expires</th>
-                  <th>WhatsApp</th>
-                  <th>Last message</th>
-                  <th />
+                  {tab === 'in' ? (
+                    <>
+                      <th>Name</th>
+                      <th>Activity</th>
+                      <th>Facility</th>
+                      <th>Phone</th>
+                      <th>In since</th>
+                      <th />
+                    </>
+                  ) : (
+                    <>
+                      <th />
+                      <th>Name</th>
+                      <th>Phone</th>
+                      <th>Email</th>
+                      <th>Member ID</th>
+                      <th>Plan</th>
+                      <th>Expires</th>
+                      <th>WhatsApp</th>
+                      <th>Last message</th>
+                      <th />
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {take(members, page).map((member) => (
                   <tr key={member.id} className="is-link" onClick={() => navigate(`/pos/backend/people/${member.id}`)}>
-                    <td className="gk-actions" onClick={stop}>
-                      <input
-                        type="checkbox"
-                        checked={picked.includes(member.id)}
-                        aria-label={`Select ${member.name}`}
-                        onChange={() => setPicked((current) => current.includes(member.id) ? current.filter((id) => id !== member.id) : [...current, member.id])}
-                      />
-                    </td>
-                    <td>
-                      <strong>{member.name}</strong>
-                      <div className="gk-muted">{member.hereNow ? (member.hereSport || member.hereNow) : member.memberCode}{member.isMember ? ' · Member' : ''}</div>
-                    </td>
-                    <td>{member.mobile}</td>
-                    <td>{member.email || '—'}</td>
-                    <td>{member.memberCode || '—'}</td>
-                    <td>{member.planName || member.membershipStatus || '—'}</td>
-                    <td>{member.expiresAt ? member.expiresAt.slice(0, 10) : '—'}</td>
-                    <td>{waLabel(member.consentStatus)}</td>
-                    <td>{member.lastWhatsAppAt ? `${member.lastWhatsAppStatus || ''} · ${when(member.lastWhatsAppAt)}` : '—'}</td>
-                    <td className="gk-actions" onClick={stop}>
-                      <button type="button" className="gk-btn gk-btn--sm" onClick={() => navigate(`/pos/backend/people/${member.id}`)}>Profile</button>
-                      <button type="button" className="gk-btn gk-btn--sm" onClick={() => { stashSelectedMembers([member.id]); navigate('/pos/backend/communications/compose'); }}>WhatsApp</button>
-                    </td>
+                    {tab === 'in' ? (
+                      <>
+                        <td>
+                          <strong>{member.name}</strong>
+                          <div className="gk-muted">{member.memberCode || 'Member'}</div>
+                        </td>
+                        <td>{member.hereSport || member.accessInterest || '—'}</td>
+                        <td><strong>{member.hereNow || '—'}</strong></td>
+                        <td>{member.mobile || '—'}</td>
+                        <td>{member.lastInAt ? when(member.lastInAt) : '—'}</td>
+                        <td className="gk-actions" onClick={stop}>
+                          <a className="gk-btn gk-btn--sm" href={`tel:+91${(member.mobile || '').replace(/\D/g, '').slice(-10)}`}>Call</a>
+                          <button type="button" className="gk-btn gk-btn--sm" onClick={() => navigate(`/pos/backend/people/${member.id}`)}>Profile</button>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="gk-actions" onClick={stop}>
+                          <input
+                            type="checkbox"
+                            checked={picked.includes(member.id)}
+                            aria-label={`Select ${member.name}`}
+                            onChange={() => setPicked((current) => current.includes(member.id) ? current.filter((id) => id !== member.id) : [...current, member.id])}
+                          />
+                        </td>
+                        <td>
+                          <strong>{member.name}</strong>
+                          <div className="gk-muted">{member.hereNow ? `${member.hereSport || member.accessInterest || 'In'} · ${member.hereNow}` : member.memberCode}{member.isMember ? ' · Member' : ''}</div>
+                        </td>
+                        <td>{member.mobile}</td>
+                        <td>{member.email || '—'}</td>
+                        <td>{member.memberCode || '—'}</td>
+                        <td>{member.planName || member.membershipStatus || '—'}</td>
+                        <td>{member.expiresAt ? member.expiresAt.slice(0, 10) : '—'}</td>
+                        <td>{waLabel(member.consentStatus)}</td>
+                        <td>{member.lastWhatsAppAt ? `${member.lastWhatsAppStatus || ''} · ${when(member.lastWhatsAppAt)}` : '—'}</td>
+                        <td className="gk-actions" onClick={stop}>
+                          <button type="button" className="gk-btn gk-btn--sm" onClick={() => navigate(`/pos/backend/people/${member.id}`)}>Profile</button>
+                          <button type="button" className="gk-btn gk-btn--sm" onClick={() => { stashSelectedMembers([member.id]); navigate('/pos/backend/communications/compose'); }}>WhatsApp</button>
+                        </td>
+                      </>
+                    )}
                   </tr>
                 ))}
                 {!members.length ? (
                   <tr>
-                    <td colSpan={10} className="o-be-table__empty">
-                      {tab === 'in' ? 'No one is in yet — they appear here after they scan the court QR' : 'No members yet — add one from this page'}
+                    <td colSpan={tab === 'in' ? 6 : 10} className="o-be-table__empty">
+                      {tab === 'in' ? 'No one is in yet — they appear here after they scan the door QR' : 'No members yet — add one from this page'}
                     </td>
                   </tr>
                 ) : null}
@@ -510,6 +558,15 @@ export function FacilitiesPage() {
   return (
     <Shell title="Activities" error={error || boardLoad.error}>
       <Head title="Activities">
+        <button
+          type="button"
+          className="gk-btn gk-btn--primary"
+          onClick={() => {
+            void printDoorQr().catch((err: unknown) => pushToast(err instanceof Error ? err.message : 'Could not print the QR.'));
+          }}
+        >
+          Print QR
+        </button>
         <button type="button" className="gk-btn" onClick={() => navigate('/pos/backend/facilities/new')}>Add facility</button>
       </Head>
       <div className="gk-arenas">
@@ -1323,14 +1380,26 @@ export function SessionsPage() {
   );
 }
 
-function JoinRequestsList({ route, embedded = false }: { route: 'TRAINER' | 'STAFF'; embedded?: boolean }) {
+function JoinRequestsList({
+  route,
+  embedded = false,
+  lockedTrainerId,
+}: {
+  route: 'TRAINER' | 'STAFF';
+  embedded?: boolean;
+  lockedTrainerId?: string;
+}) {
   const navigate = useNavigate();
-  const title = route === 'TRAINER' ? 'Trainer requests' : 'Membership requests';
+  const title = route === 'TRAINER' ? 'Trainer requests' : 'Desk requests';
   const base = route === 'TRAINER' ? '/pos/backend/trainer-requests' : '/pos/backend/membership-requests';
   const { data, error, reload } = useLoad<{ requests: JoinRequest[] }>(`/api/gym/join-requests?route=${route}`);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('open');
+  const [kind, setKind] = useState('all');
   const [trainer, setTrainer] = useState('all');
+  useEffect(() => {
+    if (lockedTrainerId) setTrainer(lockedTrainerId);
+  }, [lockedTrainerId]);
   const requests = data?.requests ?? [];
   const trainerOptions = useMemo(() => {
     const seen = new Map<string, string>();
@@ -1345,45 +1414,84 @@ function JoinRequestsList({ route, embedded = false }: { route: 'TRAINER' | 'STA
   const rows = requests.filter((row) => {
     if (status === 'open' && row.status !== 'NEW' && row.status !== 'CONTACTED') return false;
     if (status !== 'open' && status !== 'all' && row.status !== status) return false;
-    if (route === 'TRAINER' && trainer !== 'all' && row.trainerId !== trainer) return false;
-    if (needle && !`${row.ref} ${row.name} ${row.mobile} ${row.email} ${row.sport} ${row.trainerName} ${row.planName}`.toLowerCase().includes(needle)) return false;
+    if (kind === 'JOIN' && row.kind && row.kind !== 'JOIN') return false;
+    if (kind === 'SESSION' && row.kind !== 'SESSION') return false;
+    if (kind === 'REPORT' && row.kind !== 'REPORT') return false;
+    if (lockedTrainerId && row.trainerId && row.trainerId !== lockedTrainerId) return false;
+    if (route === 'TRAINER' && !lockedTrainerId && trainer !== 'all' && row.trainerId !== trainer) return false;
+    if (
+      needle
+      && !`${row.ref} ${row.name} ${row.mobile} ${row.email} ${row.sport} ${row.trainerName} ${row.planName} ${row.notes} ${row.preferredSlotLabel} ${row.kind ?? ''}`.toLowerCase().includes(needle)
+    ) return false;
     return true;
   });
   const count = (value: string) => requests.filter((row) => row.status === value).length;
-  const paidWaiting = requests.filter((row) => row.paymentStatus === 'PAID' && (row.status === 'NEW' || row.status === 'CONTACTED')).length;
-  const columns = route === 'TRAINER' ? 9 : 8;
+  const kindCount = (value: string) => requests.filter((row) => (row.kind ?? 'JOIN') === value && (row.status === 'NEW' || row.status === 'CONTACTED')).length;
+  const paidWaiting = requests.filter((row) => row.paymentStatus === 'PAID' && (row.status === 'NEW' || row.status === 'CONTACTED') && (row.kind ?? 'JOIN') === 'JOIN').length;
+  const openCount = requests.filter((row) => row.status === 'NEW' || row.status === 'CONTACTED').length;
+  const columns = route === 'TRAINER' ? 6 : 8;
   const body = (
     <>
       {embedded && error ? <p className="o-track__error">{error}</p> : null}
       <section className="o-track__status">
-        <article className="o-track__stat o-track__stat--plain"><span>New</span><strong>{count('NEW')}</strong><em>Waiting for a call</em></article>
-        <article className="o-track__stat o-track__stat--plain"><span>Contacted</span><strong>{count('CONTACTED')}</strong><em>Called, not decided</em></article>
-        <article className="o-track__stat o-track__stat--plain"><span>Paid, not approved</span><strong>{paidWaiting}</strong><em>Approve to start the plan</em></article>
-        <article className="o-track__stat o-track__stat--plain"><span>Approved</span><strong>{count('APPROVED')}</strong><em>Now members</em></article>
+        {route === 'TRAINER' ? (
+          <>
+            <article className="o-track__stat o-track__stat--plain"><span>Waiting</span><strong>{openCount}</strong><em>Tap a name, then Approve</em></article>
+            <article className="o-track__stat o-track__stat--plain"><span>Sessions</span><strong>{kindCount('SESSION')}</strong><em>Book a court</em></article>
+            <article className="o-track__stat o-track__stat--plain"><span>Reports</span><strong>{kindCount('REPORT')}</strong><em>Mark seen when done</em></article>
+          </>
+        ) : (
+          <>
+            <article className="o-track__stat o-track__stat--plain"><span>New</span><strong>{count('NEW')}</strong><em>Waiting for a call</em></article>
+            <article className="o-track__stat o-track__stat--plain"><span>Open sessions</span><strong>{kindCount('SESSION')}</strong><em>From the member site</em></article>
+            <article className="o-track__stat o-track__stat--plain"><span>Open reports</span><strong>{kindCount('REPORT')}</strong><em>From the member site</em></article>
+            <article className="o-track__stat o-track__stat--plain"><span>Paid, not approved</span><strong>{paidWaiting}</strong><em>Approve to start the plan</em></article>
+          </>
+        )}
       </section>
       <div className="gk-toolbar">
-        <input className="gk-input" value={q} placeholder="Search name, phone or ref" aria-label={`Search ${title.toLowerCase()}`} onChange={(event) => setQ(event.target.value)} />
+        <input className="gk-input" value={q} placeholder={route === 'TRAINER' ? 'Search name or phone' : 'Search name, phone, ref, purpose'} aria-label={`Search ${title.toLowerCase()}`} onChange={(event) => setQ(event.target.value)} />
         <Dropdown
           label="Request status"
           value={status}
           onChange={setStatus}
-          options={[
-            { value: 'open', label: 'Open requests' },
-            { value: 'NEW', label: 'New' },
-            { value: 'CONTACTED', label: 'Contacted' },
-            { value: 'APPROVED', label: 'Approved' },
-            { value: 'DECLINED', label: 'Declined' },
-            { value: 'all', label: 'All requests' },
-          ]}
+          options={route === 'TRAINER'
+            ? [
+              { value: 'open', label: 'Needs action' },
+              { value: 'APPROVED', label: 'Done' },
+              { value: 'DECLINED', label: 'Declined' },
+              { value: 'all', label: 'Everything' },
+            ]
+            : [
+              { value: 'open', label: 'Open requests' },
+              { value: 'NEW', label: 'New' },
+              { value: 'CONTACTED', label: 'Contacted' },
+              { value: 'APPROVED', label: 'Approved' },
+              { value: 'DECLINED', label: 'Declined' },
+              { value: 'all', label: 'All requests' },
+            ]}
         />
-        {route === 'TRAINER' ? <Dropdown label="Trainer" value={trainer} onChange={setTrainer} options={trainerOptions} /> : null}
+        {route === 'STAFF' ? (
+          <Dropdown
+            label="Request kind"
+            value={kind}
+            onChange={setKind}
+            options={[
+              { value: 'all', label: 'All kinds' },
+              { value: 'JOIN', label: 'Membership' },
+              { value: 'SESSION', label: 'Session bookings' },
+              { value: 'REPORT', label: 'Reports' },
+            ]}
+          />
+        ) : null}
+        {route === 'TRAINER' && !lockedTrainerId ? <Dropdown label="Trainer" value={trainer} onChange={setTrainer} options={trainerOptions} /> : null}
       </div>
       <ChromeRecords
         items={rows.map((row) => ({
           id: row.id,
-          title: `${row.ref} · ${row.name}`,
-          subtitle: row.kind === 'SESSION' ? `${row.sport} session` : row.sport,
-          meta: row.kind === 'SESSION' ? (row.preferredSlotLabel || 'Session') : row.wantsTrainer ? (row.trainerName || 'Unassigned') : (row.planName || 'No plan yet'),
+          title: row.name,
+          subtitle: row.kind === 'SESSION' ? `${row.sport} session` : row.kind === 'REPORT' ? 'Report' : row.sport,
+          meta: row.kind === 'SESSION' ? (row.preferredSlotLabel || 'Session') : row.kind === 'REPORT' ? (row.notes || 'Report') : (row.preferredSlotLabel || 'Needs approve'),
           href: `${base}/${row.id}`,
           when: row.createdAt,
         }))}
@@ -1393,43 +1501,81 @@ function JoinRequestsList({ route, embedded = false }: { route: 'TRAINER' | 'STA
       <table className="o-be-table gk-table">
         <thead>
           <tr>
-            <th>Request</th>
-            <th>Applicant</th>
-            <th>Contact</th>
-            <th>Sport</th>
-            {route === 'TRAINER' ? <><th>Trainer</th><th>Preferred time</th></> : <th>Type</th>}
-            <th>Plan</th>
-            <th>Status</th>
-            <th />
+            {route === 'TRAINER' ? (
+              <>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Sport</th>
+                <th>Time</th>
+                <th>Status</th>
+                <th />
+              </>
+            ) : (
+              <>
+                <th>Request</th>
+                <th>Applicant</th>
+                <th>Contact</th>
+                <th>Sport</th>
+                <th>Type</th>
+                <th>Detail</th>
+                <th>Status</th>
+                <th />
+              </>
+            )}
           </tr>
         </thead>
         <tbody>
           {take(rows, page).map((row) => (
             <tr key={row.id} className="is-link" onClick={() => navigate(`${base}/${row.id}`)}>
-              <td><strong>{row.ref}</strong><div className="gk-muted">{whenText(row.createdAt)}</div></td>
-              <td><strong>{row.name}</strong><div className="gk-muted">{row.age != null ? `${row.age} yrs` : '—'}</div></td>
-              <td>{row.mobile}<div className="gk-muted">{row.email}{row.hasPassword ? ' · login set' : ''}{row.hasPortrait ? ' · photo' : ''}</div></td>
-              <td>{row.sport}{row.kind === 'SESSION' && row.preferredSlotLabel ? <div className="gk-muted">{row.preferredSlotLabel}</div> : null}</td>
-              {route === 'TRAINER'
-                ? <><td>{row.trainerName || 'Unassigned'}</td><td>{row.preferredSlotLabel || 'No preference'}</td></>
-                : <td>{row.kind === 'SESSION' ? 'Session' : 'Membership'}{row.kind !== 'SESSION' && row.govtIdLabel ? <div className="gk-muted">{row.govtIdLabel}</div> : null}</td>}
-              <td>{row.kind === 'SESSION' ? 'Session request' : row.planName ? `${row.planName} · ${formatINR(row.amount)}` : 'No plan yet'}<div className="gk-muted">{row.kind === 'SESSION' ? (row.preferredSlotLabel || 'Awaiting desk') : row.becomeMember ? 'Wants membership' : row.isMember ? 'Says member' : joinPayment(row)}</div></td>
-              <td><span className={`gk-pill is-join-${row.status.toLowerCase()}`}>{JOIN_STATUS[row.status] ?? row.status}</span></td>
-              <td className="gk-actions">
-                <a className="gk-btn gk-btn--sm" href={`tel:+91${row.mobile}`} onClick={stop}>Call</a>
-                {row.status === 'NEW' ? (
-                  <button
-                    type="button"
-                    className="gk-btn gk-btn--sm"
-                    onClick={(event) => {
-                      stop(event);
-                      void act(() => api(`/api/gym/join-requests/${row.id}/contacted`, { method: 'POST', body: '{}' }), 'Marked contacted', reload);
-                    }}
-                  >
-                    Contacted
-                  </button>
-                ) : null}
-              </td>
+              {route === 'TRAINER' ? (
+                <>
+                  <td><strong>{row.name}</strong><div className="gk-muted">{whenText(row.createdAt)}</div></td>
+                  <td>{row.mobile || '—'}</td>
+                  <td>{row.sport || (row.kind === 'REPORT' ? 'Report' : '—')}</td>
+                  <td>{row.preferredSlotLabel || (row.kind === 'REPORT' ? '—' : 'Any time')}</td>
+                  <td><span className={`gk-pill is-join-${row.status.toLowerCase()}`}>{JOIN_STATUS[row.status] ?? row.status}</span></td>
+                  <td className="gk-actions">
+                    <a className="gk-btn gk-btn--sm" href={`tel:+91${row.mobile}`} onClick={stop}>Call</a>
+                    {(row.status === 'NEW' || row.status === 'CONTACTED') ? (
+                      <button
+                        type="button"
+                        className="gk-btn gk-btn--sm gk-btn--primary"
+                        onClick={(event) => {
+                          stop(event);
+                          navigate(`${base}/${row.id}`);
+                        }}
+                      >
+                        Open
+                      </button>
+                    ) : null}
+                  </td>
+                </>
+              ) : (
+                <>
+                  <td><strong>{row.ref}</strong><div className="gk-muted">{whenText(row.createdAt)}</div></td>
+                  <td><strong>{row.name}</strong><div className="gk-muted">{row.age != null ? `${row.age} yrs` : '—'}</div></td>
+                  <td>{row.mobile}<div className="gk-muted">{row.email}{row.hasPassword ? ' · login set' : ''}{row.hasPortrait ? ' · photo' : ''}</div></td>
+                  <td>{row.sport}{row.kind === 'SESSION' && row.preferredSlotLabel ? <div className="gk-muted">{row.preferredSlotLabel}</div> : null}</td>
+                  <td>{row.kind === 'SESSION' ? 'Session' : row.kind === 'REPORT' ? 'Report' : 'Membership'}{row.kind !== 'SESSION' && row.govtIdLabel ? <div className="gk-muted">{row.govtIdLabel}</div> : null}</td>
+                  <td>{row.kind === 'SESSION' ? 'Session request' : row.kind === 'REPORT' ? 'Member report' : row.planName ? `${row.planName} · ${formatINR(row.amount)}` : 'No plan yet'}<div className="gk-muted">{row.kind === 'SESSION' ? (row.preferredSlotLabel || 'Awaiting desk') : row.kind === 'REPORT' ? (row.notes || 'Awaiting desk') : row.becomeMember ? 'Wants membership' : row.isMember ? 'Says member' : joinPayment(row)}</div></td>
+                  <td><span className={`gk-pill is-join-${row.status.toLowerCase()}`}>{JOIN_STATUS[row.status] ?? row.status}</span></td>
+                  <td className="gk-actions">
+                    <a className="gk-btn gk-btn--sm" href={`tel:+91${row.mobile}`} onClick={stop}>Call</a>
+                    {row.status === 'NEW' ? (
+                      <button
+                        type="button"
+                        className="gk-btn gk-btn--sm"
+                        onClick={(event) => {
+                          stop(event);
+                          void act(() => api(`/api/gym/join-requests/${row.id}/contacted`, { method: 'POST', body: '{}' }), 'Marked contacted', reload);
+                        }}
+                      >
+                        Contacted
+                      </button>
+                    ) : null}
+                  </td>
+                </>
+              )}
             </tr>
           ))}
           {!rows.length ? (
@@ -1455,11 +1601,64 @@ function JoinRequestsList({ route, embedded = false }: { route: 'TRAINER' | 'STA
 }
 
 export function TrainerRequestsPage() {
-  return <JoinRequestsList route="TRAINER" />;
+  const desk = getDeskMode();
+  const { data } = useLoad<{ trainer: { id: string } | null }>('/api/gym/me/trainer');
+  const locked = desk === 'trainer' ? data?.trainer?.id : undefined;
+  return <JoinRequestsList route="TRAINER" lockedTrainerId={locked} />;
 }
 
 export function MembershipRequestsPage() {
   return <JoinRequestsList route="STAFF" />;
+}
+
+export function MySlotsPage() {
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const { data, error: loadError, reload } = useLoad<{
+    trainer: { id: string; name: string; specialization: string; freeSlots: string[]; availability: string } | null;
+    heldSlots: HeldSlot[];
+  }>('/api/gym/me/trainer');
+  const [freeSlots, setFreeSlots] = useState<string[]>([]);
+  const trainer = data?.trainer;
+  useEffect(() => {
+    setFreeSlots(trainer?.freeSlots ?? []);
+  }, [trainer?.id, trainer?.freeSlots]);
+
+  function submit() {
+    if (!trainer || busy) return;
+    setBusy(true);
+    setSaveError('');
+    void api('/api/gym/me/trainer', { method: 'PATCH', body: JSON.stringify({ freeSlots }) })
+      .then(() => {
+        pushToast('Slots saved');
+        return reload();
+      })
+      .catch((err: unknown) => setSaveError(err instanceof Error ? err.message : 'Could not save slots.'))
+      .finally(() => setBusy(false));
+  }
+
+  return (
+    <Shell title="My slots" error={loadError || saveError}>
+      <Head title="My slots">
+        {trainer ? (
+          <button type="button" className="gk-btn" disabled={busy} onClick={submit}>
+            {busy ? 'Saving…' : 'Save slots'}
+          </button>
+        ) : null}
+      </Head>
+      {!trainer ? (
+        <p className="o-be-table__empty">No trainer profile is linked to this login. Ask the desk to match your email on a trainer record.</p>
+      ) : (
+        <div className="gk-myslots">
+          <p className="gk-myslots__who">
+            <strong>{trainer.name}</strong>
+            <span>{trainer.specialization || 'Trainer'}</span>
+          </p>
+          <SlotGrid value={freeSlots} onChange={setFreeSlots} held={data?.heldSlots ?? []} />
+        </div>
+      )}
+    </Shell>
+  );
 }
 
 export function NotificationsPage() {

@@ -53,14 +53,32 @@ export function SlotGrid({ value, onChange, held = [] }: { value: string[]; onCh
   }
 
   const summary = summarizeSlots(value);
+  const clearable = value.some((slot) => !holders.has(slot));
+
   return (
     <div className="gk-slots">
       <div className="gk-slots__bar">
-        <strong>{value.length} free {value.length === 1 ? 'hour' : 'hours'} a week</strong>
-        <span>{summary || 'No free slots yet — click or drag across the grid'}</span>
-        <span className="gk-slots__legend"><i className="is-free" /> Free <i className="is-held" /> Taken by a member</span>
-        <button type="button" className="gk-btn gk-btn--sm" disabled={!value.length || value.every((slot) => holders.has(slot))} onClick={() => apply(value, 'remove')}>Clear</button>
+        <div className="gk-slots__meta">
+          <strong>{value.length} free {value.length === 1 ? 'hour' : 'hours'} a week</strong>
+          <span className="gk-slots__summary">{summary || 'Paint free hours — click or drag across the grid'}</span>
+        </div>
+        <div className="gk-slots__tools">
+          <span className="gk-slots__legend" aria-hidden>
+            <i className="is-off" /> Off
+            <i className="is-free" /> Free
+            <i className="is-held" /> Booked
+          </span>
+          <button
+            type="button"
+            className="gk-btn gk-btn--sm"
+            disabled={!clearable}
+            onClick={() => apply(value, 'remove')}
+          >
+            Clear free
+          </button>
+        </div>
       </div>
+      <p className="gk-slots__hint">Tip: click a day or time label to flip that whole column or row.</p>
       <div className="gk-slots__scroll">
         <table className="gk-slots__grid" onPointerLeave={() => { paint.current = null; }}>
           <thead>
@@ -87,9 +105,9 @@ export function SlotGrid({ value, onChange, held = [] }: { value: string[]; onCh
                     <td key={slot}>
                       <button
                         type="button"
-                        className={`gk-slot${on ? ' is-free' : ''}${holder ? ' is-held' : ''}`}
+                        className={`gk-slot${on ? ' is-free' : ' is-off'}${holder ? ' is-held' : ''}`}
                         aria-pressed={on}
-                        aria-label={`${day} ${hour} to ${endOf(hour)}${holder ? `, taken by ${holder.name}` : on ? ', free' : ''}`}
+                        aria-label={`${day} ${hour} to ${endOf(hour)}${holder ? `, taken by ${holder.name}` : on ? ', free' : ', off'}`}
                         title={holder ? `${holder.name} · approved request` : `${day} ${hour}–${endOf(hour)}`}
                         disabled={Boolean(holder)}
                         onPointerDown={(event) => {
@@ -104,7 +122,7 @@ export function SlotGrid({ value, onChange, held = [] }: { value: string[]; onCh
                         }}
                         onKeyDown={(event) => onKey(event, slot)}
                       >
-                        {holder ? initials(holder.name) : null}
+                        {holder ? <em>{initials(holder.name)}</em> : on ? <span className="gk-slot__mark" aria-hidden /> : null}
                       </button>
                     </td>
                   );

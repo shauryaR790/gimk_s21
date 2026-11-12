@@ -364,6 +364,7 @@ export function RecordForm({
   error,
   busy,
   saveLabel = 'Save',
+  showSave = true,
   onSave,
   onDiscard,
   actions,
@@ -385,6 +386,7 @@ export function RecordForm({
   error?: string;
   busy?: boolean;
   saveLabel?: string;
+  showSave?: boolean;
   onSave: () => void;
   onDiscard: () => void;
   actions?: ReactNode;
@@ -438,14 +440,20 @@ export function RecordForm({
             <strong>{recordId ? (name.trim() || kind) : 'New'}</strong>
           </nav>
           <div className="gk-rec__actions">
-            <button type="button" className="gk-btn" disabled={busy} onClick={onSave}>{busy ? 'Saving...' : saveLabel}</button>
-            <button type="button" className="gk-btn" disabled={busy} onClick={onDiscard}>Discard</button>
+            {showSave ? (
+              <>
+                <button type="button" className="gk-btn" disabled={busy} onClick={onSave}>{busy ? 'Saving...' : saveLabel}</button>
+                <button type="button" className="gk-btn" disabled={busy} onClick={onDiscard}>Discard</button>
+              </>
+            ) : null}
             {actions}
           </div>
         </div>
-        <button type="button" className="o-prod__doc" disabled>
-          <span aria-hidden>▤</span> Documents <em>{documents}</em>
-        </button>
+        {documents != null ? (
+          <button type="button" className="o-prod__doc" disabled>
+            <span aria-hidden>▤</span> Documents <em>{documents}</em>
+          </button>
+        ) : <span />}
         <div className="o-prod__pager">
           {pager ? (
             <>

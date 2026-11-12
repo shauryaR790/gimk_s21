@@ -24,7 +24,7 @@ import { pushToast } from '../../components/Toast';
 import type { ConnState } from '../../components/ConnectionStatus';
 import { deviceId, enqueue, habdb, pendingQueue, readCatalog, writeCatalog, type LocalCatalog, type QueueOp } from '../../db/idb';
 import { api, ApiError, isNetworkError } from '../../lib/api';
-import { clearStaffSession, markStaffSession } from './staffSession';
+import { clearStaffSession, deskModeFromRole, markStaffSession, setDeskMode } from './staffSession';
 
 type User = { id: string; name: string; email: string; role: string };
 type PaymentConfig = { razorpayKeyId: string };
@@ -279,6 +279,7 @@ export function PosProvider({ children }: { children: ReactNode }) {
           if (cancel) return;
           setUser(me.user);
           markStaffSession();
+          setDeskMode(deskModeFromRole(me.user.role));
           await habdb.meta.put({ key: 'user', value: me.user });
           await pullRef.current();
         } catch (error) {

@@ -6,7 +6,7 @@ export type DeskMode = 'owner' | 'employee' | 'trainer';
 export const DESK_HOMES: Record<DeskMode, string> = {
   owner: '/pos',
   employee: '/pos',
-  trainer: '/pos',
+  trainer: '/pos/backend/trainer-requests',
 };
 
 export const EMPLOYEE_LINKS = [
@@ -20,12 +20,28 @@ export const EMPLOYEE_LINKS = [
   { to: '/pos/backend/inventory', label: 'Inventory' },
 ] as const;
 
+/** Trainer desk: coaching requests, own slots, inventory, maintenance only. */
+export const TRAINER_LINKS = [
+  { to: '/pos/backend/trainer-requests', label: 'Requests', end: false },
+  { to: '/pos/backend/my-slots', label: 'My slots', end: false },
+  { to: '/pos/backend/inventory', label: 'Inventory', end: false },
+  { to: '/pos/backend/maintenance', label: 'Maintenance', end: false },
+] as const;
+
+const TRAINER_PATH_PREFIXES = [
+  '/pos/backend/trainer-requests',
+  '/pos/backend/my-slots',
+  '/pos/backend/inventory',
+  '/pos/backend/maintenance',
+  '/pos/login',
+] as const;
+
 export const ACTIVE_USER_TABS = [
   { id: 'all', label: 'All', to: '/pos/backend/people' },
   { id: 'in', label: 'In now', to: '/pos/backend/people?tab=in' },
   { id: 'members', label: 'Members', to: '/pos/backend/people?tab=members' },
   { id: 'expiring', label: 'Expiring', to: '/pos/backend/people?tab=expiring' },
-  { id: 'requests', label: 'Requests', to: '/pos/backend/people?tab=requests' },
+  { id: 'requests', label: 'Desk requests', to: '/pos/backend/people?tab=requests' },
   { id: 'plans', label: 'Plans', to: '/pos/backend/people?tab=plans' },
 ] as const;
 
@@ -57,13 +73,20 @@ export function communicationsTabId(pathname: string) {
   return 'overview';
 }
 
-export const TRAINER_LINKS = [
-  { to: '/pos/backend/shift', label: 'My shift' },
-  { to: '/pos/backend/sessions', label: 'Sessions' },
-  { to: '/pos/backend/classes', label: 'Classes' },
-  { to: '/pos/backend/trainer-requests', label: 'Trainer requests' },
-  { to: '/pos/backend/facilities', label: 'Activities' },
-] as const;
+export function deskModeFromRole(role: string | null | undefined): DeskMode {
+  if (role === 'COACH') return 'trainer';
+  if (role === 'SUPER_ADMIN' || role === 'MANAGER') return 'owner';
+  return 'employee';
+}
+
+export function trainerPathAllowed(pathname: string) {
+  const path = pathname.split('?')[0] || pathname;
+  return TRAINER_PATH_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+}
+
+export function deskLinksFor(mode: DeskMode) {
+  return mode === 'trainer' ? TRAINER_LINKS : EMPLOYEE_LINKS;
+}
 
 export function markStaffSession() {
   try {
@@ -140,6 +163,12 @@ export function deskLinkActive(to: string, pathname: string, end = false) {
   }
   if (to === '/pos/backend/communications') {
     return pathname.startsWith('/pos/backend/communications');
+  }
+  if (to === '/pos/backend/trainer-requests') {
+    return pathname.startsWith('/pos/backend/trainer-requests');
+  }
+  if (to === '/pos/backend/my-slots') {
+    return pathname.startsWith('/pos/backend/my-slots');
   }
   return pathname.startsWith(to);
 }

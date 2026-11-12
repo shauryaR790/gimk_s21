@@ -293,7 +293,13 @@ export function VisitorRecordPage() {
           </Field>
           <Field label="Membership"><Dropdown variant="field" label="Membership" value={planId} options={planChoices} onChange={setPlanId} /></Field>
           <Field label="Status"><strong>{member ? `${member.isMember ? 'Member' : 'Pending'} · ${member.memberCode}${member.isMember && member.expiresAt ? ` · until ${member.expiresAt.slice(0, 10)}` : ''}` : 'New member'}</strong></Field>
-          <Field label="Where now"><strong>{member?.hereNow ? (member.hereSport || member.hereNow) : 'Not in'}</strong></Field>
+          <Field label="Where now">
+            <strong>
+              {member?.hereNow
+                ? `${member.hereSport || member.accessInterest || 'In'} · ${member.hereNow}`
+                : 'Not in'}
+            </strong>
+          </Field>
           <Field label="Last tap"><strong>{member?.lastInAt ? (member.tappedToday ? `Today ${clock(member.lastInAt)}` : stamp(member.lastInAt)) : 'Never'}</strong></Field>
           <Field label="Visits"><strong>{member?.visits ?? profile?.checkIns.length ?? 0}</strong></Field>
           <Field label="Time on services"><strong>{profile ? `${profile.timeUsedMinutes} minutes` : '—'}</strong></Field>
@@ -1657,7 +1663,7 @@ export type JoinRequest = {
   govtIdUrl: string;
   hasIdPhoto: boolean;
   wantsTrainer: boolean;
-  kind?: 'JOIN' | 'SESSION';
+  kind?: 'JOIN' | 'SESSION' | 'REPORT';
   route: 'TRAINER' | 'STAFF';
   trainerId: string;
   trainerName: string;
@@ -1717,12 +1723,14 @@ export function JoinRequestRecordPage({ route }: { route: 'TRAINER' | 'STAFF' })
   const [becomeMember, setBecomeMember] = useState(false);
   const [method, setMethod] = useState('');
   const [confirmDecline, setConfirmDecline] = useState(false);
+  const [myTrainer, setMyTrainer] = useState<Trainer | null>(null);
   const trainers = useList<Trainer>('/api/gym/trainers', (data) => (data as { trainers: Trainer[] }).trainers);
   const plans = useList<Plan>('/api/gym/plans', (data) => (data as { plans: Plan[] }).plans);
   const facilities = useList<Facility>('/api/gym/facilities', (data) => (data as { facilities: Facility[] }).facilities);
   const siblings = useList<JoinRequest>(`/api/gym/join-requests?route=${route}`, (data) => (data as { requests: JoinRequest[] }).requests);
+  const trainerDesk = route === 'TRAINER';
 
-  const fill = useCallback((row: JoinRequest) => {
+  const fill = useCallback((row: JoinRequest, forceTrainerId?: string) => {
     setRequest(row);
     setName(row.name);
     setMobile(row.mobile);
@@ -1732,8 +1740,8 @@ export function JoinRequestRecordPage({ route }: { route: 'TRAINER' | 'STAFF' })
     setPhoto(row.photoUrl);
     setIdShot(row.govtIdUrl);
     setSport(row.sport);
-    setWantsTrainer(row.wantsTrainer);
-    setTrainerId(row.trainerId);
+    setWantsTrainer(row.wantsTrainer || Boolean(forceTrainerId));
+    setTrainerId(forceTrainerId || row.trainerId);
     setSlot(row.preferredSlot);
     setPlanId(row.planId);
     setNotes(row.notes);
@@ -1744,9 +1752,15 @@ export function JoinRequestRecordPage({ route }: { route: 'TRAINER' | 'STAFF' })
 
   const load = useCallback(async () => {
     const data = await api<{ request: JoinRequest }>(`/api/gym/join-requests/${id}`);
-    fill(data.request);
+    let forceId = '';
+    if (trainerDesk) {
+      const me = await api<{ trainer: Trainer | null }>('/api/gym/me/trainer');
+      setMyTrainer(me.trainer);
+      forceId = me.trainer?.id || '';
+    }
+    fill(data.request, forceId || undefined);
     setRefreshKey((value) => value + 1);
-  }, [fill, id]);
+  }, [fill, id, trainerDesk]);
 
   useEffect(() => {
     setConfirmDecline(false);
@@ -1761,11 +1775,19 @@ export function JoinRequestRecordPage({ route }: { route: 'TRAINER' | 'STAFF' })
 
   const open = request ? request.status === 'NEW' || request.status === 'CONTACTED' : false;
   const paid = request?.paymentStatus === 'PAID';
+  const kind = request?.kind ?? 'JOIN';
+  const isSession = kind === 'SESSION';
+  const isReport = kind === 'REPORT';
+  const isJoin = !isSession && !isReport;
+  const noteLines = notes.split('\n');
+  const purposeLine = noteLines[0] ?? '';
+  const remarksLine = noteLines.slice(1).join('\n');
   const sportOptions = useMemo(() => {
     const names = [...new Set([...SIGNUP_ACTIVITIES, ...facilities.map((row) => row.sport.trim()).filter(Boolean)])].sort();
     return names.map((value) => ({ value, label: value }));
   }, [facilities]);
-  const trainer = trainers.find((row) => row.id === trainerId);
+  const effectiveTrainerId = trainerDesk && myTrainer?.id ? myTrainer.id : trainerId;
+  const trainer = trainers.find((row) => row.id === effectiveTrainerId) || myTrainer || undefined;
   const trainerChoices: Option[] = [
     { value: '', label: 'Any trainer' },
     ...[...trainers]
@@ -1779,15 +1801,35 @@ export function JoinRequestRecordPage({ route }: { route: 'TRAINER' | 'STAFF' })
     ...(slot && !(trainer?.freeSlots ?? []).includes(slot) ? [{ value: slot, label: `${slotLabel(slot)} · not free` }] : []),
   ];
   const plan = plans.find((row) => row.id === planId);
+  const recordKind = isSession ? 'Session request' : isReport ? 'Member report' : 'Request';
+  const crumbLabel = route === 'TRAINER' ? 'Trainer requests' : 'Desk requests';
 
   function submit() {
     void save(async () => {
+      const assignedTrainerId = trainerDesk ? (myTrainer?.id || trainerId) : trainerId;
       const data = await api<{ request: JoinRequest }>(`/api/gym/join-requests/${id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ name, mobile, email, dob, pincode, govtIdLabel: govt, govtIdUrl: idShot, photoUrl: photo, sport, wantsTrainer, trainerId, preferredSlot: slot, planId, isMember, becomeMember, notes }),
+        body: JSON.stringify({
+          name,
+          mobile,
+          email,
+          dob,
+          pincode,
+          govtIdLabel: govt,
+          govtIdUrl: idShot,
+          photoUrl: photo,
+          sport,
+          wantsTrainer: trainerDesk ? true : wantsTrainer,
+          trainerId: assignedTrainerId,
+          preferredSlot: slot,
+          planId,
+          isMember,
+          becomeMember,
+          notes,
+        }),
       });
       pushToast('Request saved');
-      fill(data.request);
+      fill(data.request, trainerDesk ? assignedTrainerId : undefined);
       setRefreshKey((value) => value + 1);
       if (data.request.route !== route) {
         navigate(`${data.request.route === 'TRAINER' ? '/pos/backend/trainer-requests' : '/pos/backend/membership-requests'}/${id}`, { replace: true });
@@ -1795,39 +1837,58 @@ export function JoinRequestRecordPage({ route }: { route: 'TRAINER' | 'STAFF' })
     });
   }
 
-  function act(path: string, body: Record<string, unknown>, done: string) {
+  function act(path: string, body: Record<string, unknown>, done: string, goList = false) {
     void save(async () => {
+      const assignedTrainerId = trainerDesk ? (myTrainer?.id || trainerId) : undefined;
+      if (path === 'approve' && trainerDesk) {
+        if (!assignedTrainerId) throw new Error('Pick who you are on the trainer login first.');
+        body = { ...body, trainerId: assignedTrainerId };
+      }
       const data = await api<{ request: JoinRequest; note?: string }>(`/api/gym/join-requests/${id}/${path}`, { method: 'POST', body: JSON.stringify(body) });
       pushToast(data.note || done);
-      fill(data.request);
+      if (goList && trainerDesk) {
+        navigate(base);
+        return;
+      }
+      fill(data.request, assignedTrainerId);
       setRefreshKey((value) => value + 1);
     });
   }
 
   const actions = request ? (
     <>
-      {request.status === 'NEW' ? <button type="button" className="gk-btn" disabled={busy} onClick={() => act('contacted', {}, 'Marked contacted')}>Mark contacted</button> : null}
+      {!trainerDesk && request.status === 'NEW' ? <button type="button" className="gk-btn" disabled={busy} onClick={() => act('contacted', {}, 'Marked contacted')}>Mark contacted</button> : null}
       {open ? (
         <button
           type="button"
-          className="gk-btn"
+          className="gk-btn gk-btn--primary"
           disabled={busy}
           onClick={() => {
             const session = request.kind === 'SESSION';
-            if (!session && !paid && !method) {
+            const report = request.kind === 'REPORT';
+            if (!session && !report && !trainerDesk && !paid && !method) {
               setError('Not paid yet. Pick cash, UPI or card in "Take payment by" on General Information, then approve.');
               return;
             }
-            act('approve', { method, notes }, session ? 'Session booked' : 'Approved · membership is active');
+            if (trainerDesk && !myTrainer?.id && !trainerId) {
+              setError('Pick who you are on the trainer login first.');
+              return;
+            }
+            act(
+              'approve',
+              { method: trainerDesk ? undefined : method, notes },
+              report ? 'Report seen' : session ? 'Session booked' : trainerDesk ? 'Approved · assigned to you' : 'Approved · membership is active',
+              trainerDesk,
+            );
           }}
         >
-          {request.kind === 'SESSION' ? 'Approve session' : 'Approve'}
+          {request.kind === 'REPORT' ? 'Mark seen' : request.kind === 'SESSION' ? 'Approve' : 'Approve'}
         </button>
       ) : null}
       {open ? (
         <button
           type="button"
-          className="gk-btn"
+          className={`gk-btn${trainerDesk ? ' gk-btn--quiet' : ''}`}
           disabled={busy}
           onClick={() => {
             if (!confirmDecline) {
@@ -1835,159 +1896,224 @@ export function JoinRequestRecordPage({ route }: { route: 'TRAINER' | 'STAFF' })
               return;
             }
             setConfirmDecline(false);
-            act('decline', { reason: notes.split('\n')[0] ?? '', notes }, 'Request declined');
+            act('decline', { reason: notes.split('\n')[0] ?? '', notes }, 'Request declined', trainerDesk);
           }}
         >
           {confirmDecline ? (paid ? 'Confirm decline & refund' : 'Confirm decline') : 'Decline'}
         </button>
       ) : null}
-      {request.status === 'APPROVED' && request.customerId ? <button type="button" className="gk-btn" onClick={() => navigate(`/pos/backend/visitors/${request.customerId}`)}>Open visitor</button> : null}
+      {!trainerDesk && request.status === 'APPROVED' && request.customerId ? <button type="button" className="gk-btn" onClick={() => navigate(`/pos/backend/visitors/${request.customerId}`)}>Open visitor</button> : null}
     </>
   ) : null;
 
-  const tabs = [
-    {
+  const tabs = trainerDesk
+    ? [{
       id: 'general',
-      label: 'General Information',
-      content: (
-        <Grid
-          left={(
-            <>
-              <Field label="Phone" required>
-                <input type="tel" value={mobile} aria-label="Phone" onChange={(event) => setMobile(event.target.value)} />
-                {mobile ? <a className="gk-link" href={`tel:+91${mobile.replace(/\D/g, '').slice(-10)}`}>Call</a> : null}
-              </Field>
-              <Field label="Email" required>
-                <input type="email" value={email} aria-label="Email" onChange={(event) => setEmail(event.target.value)} />
-                {email ? <a className="gk-link" href={`mailto:${email}`}>Email</a> : null}
-              </Field>
-              <Field label="Login password"><strong>{request?.hasPassword ? 'Set on website' : 'Not set'}</strong></Field>
-              <Field label="Pincode"><input inputMode="numeric" value={pincode} aria-label="Pincode" onChange={(event) => setPincode(event.target.value)} /></Field>
-              <Field label="Date of birth" required suffix={request?.age != null ? `${request.age} yrs` : undefined}>
-                <input type="date" value={dob} aria-label="Date of birth" onChange={(event) => setDob(event.target.value)} />
-              </Field>
-              <Field label="Government ID" required>
-                <input value={govt} aria-label="Government ID" onChange={(event) => setGovt(event.target.value)} />
-                {idShot ? <img className="gk-id" src={idShot} alt="Government ID" /> : null}
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  aria-label="Government ID photo"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    event.target.value = '';
-                    if (!file) return;
-                    void readIdImage(file).then(setIdShot).catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not read that photo.'));
-                  }}
-                />
-              </Field>
-              <Field label="Sport" required>
-                <Dropdown variant="field" label="Sport" value={sport} options={sportOptions} onChange={setSport} disabled={!open} />
-              </Field>
-            </>
-          )}
-          right={(
-            <>
-              <Field label="Plan" required>
-                <Dropdown
-                  variant="field"
-                  label="Plan"
-                  value={planId}
-                  options={plans.filter((row) => row.isActive || row.id === planId).map((row) => ({ value: row.id, label: `${row.name} · ${row.durationDays} days` }))}
-                  onChange={setPlanId}
-                  disabled={!open || paid}
-                />
-              </Field>
-              <Field label="Amount"><strong>{request ? formatINR(request.amount) : '—'}</strong>{plan && request && plan.price !== request.amount ? <em>incl. tax</em> : null}</Field>
-              <Field label="Payment"><strong>{request ? joinPayment(request) : '—'}</strong></Field>
-              {open && !paid ? (
-                <Field label="Take payment by">
-                  <Dropdown
-                    variant="field"
-                    label="Take payment by"
-                    value={method}
-                    placeholder="Cash, UPI or card"
-                    options={[{ value: 'CASH', label: 'Cash' }, { value: 'UPI', label: 'UPI' }, { value: 'CARD', label: 'Card' }]}
-                    onChange={setMethod}
-                  />
-                </Field>
-              ) : null}
-              <Field label="Status"><span className={`gk-pill is-join-${(request?.status ?? 'new').toLowerCase()}`}>{JOIN_STATUS[request?.status ?? ''] ?? '—'}</span></Field>
-            </>
-          )}
-        />
-      ),
-    },
-    ...(wantsTrainer ? [{
-      id: 'trainer',
-      label: 'Trainer',
-      content: (
-        <Grid
-          left={(
-            <>
-              <Field label="Trainer" required>
-                <Dropdown variant="field" label="Trainer" value={trainerId} options={trainerChoices} onChange={(value) => { setTrainerId(value); setSlot(''); }} disabled={!open} />
-              </Field>
-              <Field label="Preferred time">
-                <Dropdown variant="field" label="Preferred time" value={slot} options={slotChoices} onChange={setSlot} disabled={!open || !trainerId} />
-              </Field>
-            </>
-          )}
-          right={(
-            <>
-              <Field label="Trainer phone">
-                {trainer?.phone ? <><strong>{trainer.phone}</strong><a className="gk-link" href={`tel:+91${trainer.phone}`}>Call</a></> : <strong>—</strong>}
-              </Field>
-              <Field label="Trainer hours"><strong className="gk-hours">{trainer?.availability || '—'}</strong></Field>
-            </>
-          )}
-        />
-      ),
-    }] : []),
-    {
-      id: 'request',
       label: 'Request',
       content: (
         <Grid
           left={(
             <>
-              <Field label="Reference"><strong>{request?.ref ?? '—'}</strong></Field>
-              <Field label="Received"><strong>{stamp(request?.createdAt)}</strong></Field>
-              <Field label="Sent to"><strong>{wantsTrainer ? 'Trainer requests' : 'Membership requests'}</strong></Field>
+              <Field label="Phone">
+                <strong>{mobile || '—'}</strong>
+                {mobile ? <a className="gk-link" href={`tel:+91${mobile.replace(/\D/g, '').slice(-10)}`}>Call</a> : null}
+              </Field>
+              <Field label="Email"><strong>{email || '—'}</strong></Field>
+              <Field label={isSession ? 'Venue' : 'Sport'}><strong>{sport || '—'}</strong></Field>
+              {isJoin ? <Field label="Preferred time"><strong>{request?.preferredSlotLabel || slotLabel(slot) || 'No preference'}</strong></Field> : null}
+              {isSession ? <Field label="Requested slot"><strong>{request?.preferredSlotLabel || '—'}</strong></Field> : null}
             </>
           )}
           right={(
             <>
-              <Field label="Handled by"><strong>{request?.handledBy || '—'}</strong></Field>
-              <Field label="Bill"><strong>{request?.orderNumber ? `#${request.orderNumber}` : '—'}</strong></Field>
-              <Field label="Visitor record"><strong>{request?.customerId ? 'Created' : 'On approval'}</strong></Field>
+              <Field label="What they want">
+                <strong>{isSession ? 'Book a session' : isReport ? 'Report an issue' : 'Trainer + membership'}</strong>
+              </Field>
+              {isSession || isReport ? (
+                <>
+                  <Field label={isReport ? 'Issue' : 'Purpose'}><strong>{purposeLine || '—'}</strong></Field>
+                  <Field label="Remarks"><strong>{remarksLine || '—'}</strong></Field>
+                </>
+              ) : (
+                <Field label="Goes to"><strong>{myTrainer ? myTrainer.name : 'You'}</strong></Field>
+              )}
+              <Field label="Status"><span className={`gk-pill is-join-${(request?.status ?? 'new').toLowerCase()}`}>{JOIN_STATUS[request?.status ?? ''] ?? '—'}</span></Field>
+              {photo ? <Field label="Photo"><img className="gk-id" src={photo} alt="" /></Field> : null}
             </>
           )}
         />
       ),
-    },
-  ];
+    }]
+    : [
+      {
+        id: 'general',
+        label: 'General Information',
+        content: (
+          <Grid
+            left={(
+              <>
+                <Field label="Phone" required>
+                  <input type="tel" value={mobile} aria-label="Phone" onChange={(event) => setMobile(event.target.value)} />
+                  {mobile ? <a className="gk-link" href={`tel:+91${mobile.replace(/\D/g, '').slice(-10)}`}>Call</a> : null}
+                </Field>
+                <Field label="Email" required>
+                  <input type="email" value={email} aria-label="Email" onChange={(event) => setEmail(event.target.value)} />
+                  {email ? <a className="gk-link" href={`mailto:${email}`}>Email</a> : null}
+                </Field>
+                {isJoin ? (
+                  <>
+                    <Field label="Login password"><strong>{request?.hasPassword ? 'Set on website' : 'Not set'}</strong></Field>
+                    <Field label="Pincode"><input inputMode="numeric" value={pincode} aria-label="Pincode" onChange={(event) => setPincode(event.target.value)} /></Field>
+                    <Field label="Date of birth" required suffix={request?.age != null ? `${request.age} yrs` : undefined}>
+                      <input type="date" value={dob} aria-label="Date of birth" onChange={(event) => setDob(event.target.value)} />
+                    </Field>
+                    <Field label="Government ID" required>
+                      <input value={govt} aria-label="Government ID" onChange={(event) => setGovt(event.target.value)} />
+                      {idShot ? <img className="gk-id" src={idShot} alt="Government ID" /> : null}
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        aria-label="Government ID photo"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = '';
+                          if (!file) return;
+                          void readIdImage(file).then(setIdShot).catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not read that photo.'));
+                        }}
+                      />
+                    </Field>
+                  </>
+                ) : (
+                  <Field label="Member"><strong>{request?.customerId ? 'Linked visitor' : '—'}</strong>{request?.customerId ? <button type="button" className="gk-link" onClick={() => navigate(`/pos/backend/visitors/${request.customerId}`)}>Open visitor</button> : null}</Field>
+                )}
+                <Field label={isSession ? 'Venue' : 'Sport'} required>
+                  <Dropdown variant="field" label={isSession ? 'Venue' : 'Sport'} value={sport} options={sportOptions} onChange={setSport} disabled={!open || isReport} />
+                </Field>
+              </>
+            )}
+            right={(
+              <>
+                <Field label="Kind"><strong>{isSession ? 'Session booking' : isReport ? 'Member report' : 'Membership'}</strong></Field>
+                {isSession ? <Field label="Requested slot"><strong>{request?.preferredSlotLabel || '—'}</strong></Field> : null}
+                {isSession || isReport ? (
+                  <>
+                    <Field label={isReport ? 'Issue' : 'Purpose'}><strong>{purposeLine || '—'}</strong></Field>
+                    <Field label="Remarks"><strong>{remarksLine || '—'}</strong></Field>
+                  </>
+                ) : null}
+                {isJoin ? (
+                  <>
+                    <Field label="Plan" required>
+                      <Dropdown
+                        variant="field"
+                        label="Plan"
+                        value={planId}
+                        options={plans.filter((row) => row.isActive || row.id === planId).map((row) => ({ value: row.id, label: `${row.name} · ${row.durationDays} days` }))}
+                        onChange={setPlanId}
+                        disabled={!open || paid}
+                      />
+                    </Field>
+                    <Field label="Amount"><strong>{request ? formatINR(request.amount) : '—'}</strong>{plan && request && plan.price !== request.amount ? <em>incl. tax</em> : null}</Field>
+                    <Field label="Payment"><strong>{request ? joinPayment(request) : '—'}</strong></Field>
+                    {open && !paid ? (
+                      <Field label="Take payment by">
+                        <Dropdown
+                          variant="field"
+                          label="Take payment by"
+                          value={method}
+                          placeholder="Cash, UPI or card"
+                          options={[{ value: 'CASH', label: 'Cash' }, { value: 'UPI', label: 'UPI' }, { value: 'CARD', label: 'Card' }]}
+                          onChange={setMethod}
+                        />
+                      </Field>
+                    ) : null}
+                  </>
+                ) : null}
+                <Field label="Status"><span className={`gk-pill is-join-${(request?.status ?? 'new').toLowerCase()}`}>{JOIN_STATUS[request?.status ?? ''] ?? '—'}</span></Field>
+              </>
+            )}
+          />
+        ),
+      },
+      ...(isJoin && wantsTrainer ? [{
+        id: 'trainer',
+        label: 'Trainer',
+        content: (
+          <Grid
+            left={(
+              <>
+                <Field label="Trainer" required>
+                  <Dropdown variant="field" label="Trainer" value={trainerId} options={trainerChoices} onChange={(value) => { setTrainerId(value); setSlot(''); }} disabled={!open} />
+                </Field>
+                <Field label="Preferred time">
+                  <Dropdown variant="field" label="Preferred time" value={slot} options={slotChoices} onChange={setSlot} disabled={!open || !trainerId} />
+                </Field>
+              </>
+            )}
+            right={(
+              <>
+                <Field label="Trainer phone">
+                  {trainer?.phone ? <><strong>{trainer.phone}</strong><a className="gk-link" href={`tel:+91${trainer.phone.replace(/\D/g, '').slice(-10)}`}>Call</a></> : <strong>—</strong>}
+                </Field>
+                <Field label="Trainer hours"><strong className="gk-hours">{trainer?.availability || '—'}</strong></Field>
+              </>
+            )}
+          />
+        ),
+      }] : []),
+      {
+        id: 'request',
+        label: 'Request',
+        content: (
+          <Grid
+            left={(
+              <>
+                <Field label="Reference"><strong>{request?.ref ?? '—'}</strong></Field>
+                <Field label="Received"><strong>{stamp(request?.createdAt)}</strong></Field>
+                <Field label="Inbox"><strong>{wantsTrainer ? 'Trainer requests' : 'Active users · Requests'}</strong></Field>
+              </>
+            )}
+            right={(
+              <>
+                <Field label="Handled by"><strong>{request?.handledBy || '—'}</strong></Field>
+                {isJoin ? <Field label="Bill"><strong>{request?.orderNumber ? `#${request.orderNumber}` : '—'}</strong></Field> : null}
+                <Field label="Visitor record"><strong>{request?.customerId ? 'Linked' : 'On approval'}</strong></Field>
+                {isSession ? <Field label="On approve"><strong>Creates a court booking</strong></Field> : null}
+                {isReport ? <Field label="On mark seen"><strong>Closes the report</strong></Field> : null}
+              </>
+            )}
+          />
+        ),
+      },
+    ];
 
   return (
     <RecordForm
-      kind="Request"
+      kind={recordKind}
       recordId={id}
-      crumb={{ label: route === 'TRAINER' ? 'Trainer requests' : 'Active users', to: route === 'TRAINER' ? base : '/pos/backend/people?tab=requests' }}
+      crumb={{ label: crumbLabel, to: route === 'TRAINER' ? base : '/pos/backend/people?tab=requests' }}
       name={name}
-      onName={setName}
-      namePlaceholder="Applicant name"
-      flags={[
-        { label: 'Wants a trainer', checked: wantsTrainer, onChange: (checked) => { if (open) setWantsTrainer(checked); } },
-        { label: 'Already a member', checked: isMember, onChange: (checked) => { if (open) setIsMember(checked); } },
-        { label: 'Wants membership', checked: becomeMember, onChange: (checked) => { if (open) setBecomeMember(checked); } },
+      onName={trainerDesk ? () => undefined : setName}
+      namePlaceholder={isJoin ? 'Applicant name' : 'Member name'}
+      flags={trainerDesk || !isJoin ? [] : [
+        { label: 'Wants a trainer', checked: wantsTrainer, onChange: (checked: boolean) => { if (open) setWantsTrainer(checked); } },
+        { label: 'Already a member', checked: isMember, onChange: (checked: boolean) => { if (open) setIsMember(checked); } },
+        { label: 'Wants membership', checked: becomeMember, onChange: (checked: boolean) => { if (open) setBecomeMember(checked); } },
       ]}
-      photo={{ url: photo, label: 'Photograph', onChange: (url) => setPhoto(url) }}
-      documents={(photo ? 1 : 0) + (idShot ? 1 : 0)}
+      photo={trainerDesk ? undefined : { url: photo, label: 'Photograph', onChange: (url) => setPhoto(url) }}
+      documents={trainerDesk ? undefined : (photo ? 1 : 0) + (idShot ? 1 : 0)}
       pager={pagerFor(siblings.map((row) => row.id), id, base)}
       tabs={tabs}
-      notes={{ value: notes, onChange: setNotes, placeholder: 'Call notes. The first line is saved as the reason if you decline.' }}
+      notes={trainerDesk ? undefined : {
+        value: notes,
+        onChange: setNotes,
+        placeholder: isSession || isReport
+          ? 'Purpose and remarks from the site. Desk notes can be added below.'
+          : 'Call notes. The first line is saved as the reason if you decline.',
+      }}
       error={error}
       busy={busy}
+      showSave={!trainerDesk}
       onSave={submit}
       onDiscard={() => void load()}
       actions={actions}

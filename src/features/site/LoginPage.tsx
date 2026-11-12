@@ -4,7 +4,8 @@ import { gateNext } from '../../../shared/activities';
 import { api } from '../../lib/api';
 import { saveMemberPass } from '../../lib/memberPass';
 import ball from './assets/ball.png';
-import curtains from './assets/curtains.jpg';
+import { DoneScreen } from './DoneScreen';
+import { SilkFilm } from './silk';
 import './register.css';
 
 function Eye({ open }: { open: boolean }) {
@@ -30,7 +31,7 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [note, setNote] = useState('');
+  const [pending, setPending] = useState(false);
 
   useEffect(() => {
     document.title = 'Login · Gymkhana';
@@ -46,7 +47,6 @@ export function LoginPage() {
     event.preventDefault();
     if (busy) return;
     setError('');
-    setNote('');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) {
       setError('Enter a valid email.');
       return;
@@ -62,7 +62,7 @@ export function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
       if (data.pending) {
-        setNote('Your registration is still being confirmed. We will write to this email when it is ready.');
+        setPending(true);
         return;
       }
       saveMemberPass(data.memberToken);
@@ -75,7 +75,14 @@ export function LoginPage() {
   }
 
   return (
-    <main className="gkf is-login" style={{ backgroundImage: `url(${curtains})` }}>
+    <main className={`gkf is-login${pending ? ' is-done' : ''}`}>
+      <SilkFilm className="gkf-film" />
+      {pending ? (
+        <DoneScreen
+          copy="Your registration is still being confirmed you will receive the final confirmation with login credentials on your registered mail id"
+          onContinue={() => navigate('/', { replace: true })}
+        />
+      ) : (
       <div className="gkf-sheet">
         <header className="gkf-head">
           <Link to="/" className="gkf-mark">GYMKHANA</Link>
@@ -111,13 +118,13 @@ export function LoginPage() {
           </label>
 
           {error ? <p className="gkf-error" role="alert">{error}</p> : null}
-          {note ? <p className="gkf-error" role="status">{note}</p> : null}
 
           <div className="gkf-foot">
             <button type="submit" className="gkf-confirm" disabled={busy}>{busy ? 'SIGNING IN' : 'CONFIRM'}</button>
           </div>
         </form>
       </div>
+      )}
     </main>
   );
 }

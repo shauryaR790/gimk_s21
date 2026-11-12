@@ -352,6 +352,7 @@ CREATE TABLE IF NOT EXISTS table_geometry (
   addColumn(database, 'users', 'phone', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'users', 'specialization', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'users', 'schedule_json', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'users', 'trainer_id', 'TEXT');
   database.exec(`
 CREATE TABLE IF NOT EXISTS facilities (
   id TEXT PRIMARY KEY,

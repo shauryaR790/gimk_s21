@@ -1313,18 +1313,34 @@ export function activityBoard() {
 }
 
 export function scanActivityGate(slug: string, cookieHeader?: string, pass?: string | null) {
-  const sport = sportFromSlug(slug) || matchArena(slug);
-  if (!sport) throw new AppError(400, 'SPORT', 'Unknown activity.');
   const customerId = readMemberId(cookieHeader, pass);
   if (!customerId) throw new AppError(401, 'AUTH', 'Register once on this phone, then just scan.');
-  const member = get<{ id: string; name: string }>('SELECT id, name FROM customers WHERE id = ? AND cafe_id = ?', [customerId, CAFE_ID]);
+  const member = get<{ id: string; name: string; access_interest: string }>(
+    'SELECT id, name, access_interest FROM customers WHERE id = ? AND cafe_id = ?',
+    [customerId, CAFE_ID],
+  );
   if (!member) throw new AppError(401, 'AUTH', 'Register once on this phone, then just scan.');
   if (!activeMembership(member.id)?.active) {
     throw new AppError(403, 'ACCESS', 'Only members can go in. This membership is not active.');
   }
+  const door = !String(slug ?? '').trim();
+  const registered = listedArenas(member.access_interest)[0] || '';
+  const sport = door
+    ? (registered || 'Gym')
+    : (sportFromSlug(slug) || matchArena(slug) || '');
+  if (!sport) throw new AppError(400, 'SPORT', 'Unknown activity.');
   const court = listFacilities().find((facility) => matchArena(facility.sport) === sport || matchArena(facility.name) === sport);
-  const result = checkIn({ query: member.id, facilityName: court?.name ?? sport, fromGate: true }, member.name);
-  return { ok: true, already: Boolean(result.already), sport, name: member.name, facility: court?.name ?? sport };
+  const facilityName = court?.name ?? sport;
+  const result = checkIn({ query: member.id, facilityName, fromGate: true }, member.name);
+  return {
+    ok: true,
+    already: Boolean(result.already),
+    sport,
+    activity: registered || sport,
+    name: member.name,
+    facility: facilityName,
+    door,
+  };
 }
 
 function shiftStats(name: string, since: string, until: string | null) {
@@ -1742,6 +1758,67 @@ export function trainerProfile(id: string) {
   };
 }
 
+export function trainerForStaff(user: { id?: string; email?: string; phone?: string; name?: string } | null | undefined) {
+  if (!user) return null;
+  if (user.id) {
+    const claimed = get<{ trainer_id: string | null }>('SELECT trainer_id FROM users WHERE id = ?', [user.id]);
+    if (claimed?.trainer_id) {
+      const row = get<TrainerRow>('SELECT * FROM trainers WHERE id = ? AND cafe_id = ?', [claimed.trainer_id, CAFE_ID]);
+      if (row) return trainerProfile(row.id);
+    }
+  }
+  const email = String(user.email ?? '').trim().toLowerCase();
+  if (email) {
+    const byEmail = get<TrainerRow>(
+      'SELECT * FROM trainers WHERE cafe_id = ? AND lower(email) = ? LIMIT 1',
+      [CAFE_ID, email],
+    );
+    if (byEmail) return trainerProfile(byEmail.id);
+  }
+  const phone = digits(String(user.phone ?? ''));
+  if (phone) {
+    const byPhone = get<TrainerRow>(
+      'SELECT * FROM trainers WHERE cafe_id = ? AND phone = ? LIMIT 1',
+      [CAFE_ID, phone],
+    );
+    if (byPhone) return trainerProfile(byPhone.id);
+  }
+  return null;
+}
+
+export function claimTrainerForUser(userId: string, trainerId: string) {
+  const trainer = get<TrainerRow>('SELECT * FROM trainers WHERE id = ? AND cafe_id = ? AND is_active = 1', [trainerId, CAFE_ID]);
+  if (!trainer) throw new AppError(404, 'TRAINER', 'That trainer is not available.');
+  const user = get<{ id: string }>('SELECT id FROM users WHERE id = ?', [userId]);
+  if (!user) throw new AppError(401, 'AUTH', 'Sign in again.');
+  run(
+    `UPDATE users SET trainer_id = ?, phone = ?, specialization = ?, name = ? WHERE id = ?`,
+    [trainer.id, trainer.phone || '', trainer.specialization || '', trainer.name, userId],
+  );
+  audit(trainer.name, 'TRAINER_CLAIM', 'trainer', trainer.id, `Desk signed in as ${trainer.name}`);
+  return trainerProfile(trainer.id);
+}
+
+export function saveMyTrainerSlots(user: { email?: string; phone?: string; name?: string }, freeSlots: unknown, actor: string) {
+  const linked = trainerForStaff(user);
+  if (!linked?.trainer?.id) throw new AppError(404, 'TRAINER', 'No trainer profile is linked to this login.');
+  const trainer = linked.trainer;
+  return saveTrainer({
+    id: trainer.id,
+    name: trainer.name,
+    phone: trainer.phone,
+    email: trainer.email,
+    specialization: trainer.specialization,
+    availability: trainer.availability,
+    isActive: trainer.isActive,
+    govtIdLabel: trainer.govtIdLabel,
+    govtIdUrl: trainer.govtIdUrl,
+    notes: trainer.notes,
+    offers: trainer.offers,
+    freeSlots,
+  }, actor);
+}
+
 export function saveTrainer(input: {
   id?: string;
   name?: string;
@@ -1846,6 +1923,11 @@ const JOIN_SELECT = `SELECT r.*, t.name AS trainer_name, t.phone AS trainer_phon
   LEFT JOIN membership_plans p ON p.id = r.plan_id
   LEFT JOIN orders o ON o.id = r.order_id`;
 
+function joinKind(value?: string) {
+  if (value === 'SESSION' || value === 'REPORT') return value;
+  return 'JOIN';
+}
+
 function joinRef(n: number) {
   return `GKJ${String(n).padStart(4, '0')}`;
 }
@@ -1875,7 +1957,7 @@ function mapJoin(row: JoinRow, withPhoto = false) {
     govtIdUrl: withPhoto ? row.govt_id_url : '',
     hasIdPhoto: Boolean(row.govt_id_url),
     wantsTrainer: row.wants_trainer === 1,
-    kind: row.kind === 'SESSION' ? 'SESSION' : 'JOIN',
+    kind: joinKind(row.kind),
     route: row.wants_trainer === 1 ? 'TRAINER' : 'STAFF',
     trainerId: row.trainer_id,
     trainerName: row.trainer_name ?? '',
@@ -2162,7 +2244,7 @@ export function createJoinRequest(input: JoinInput, actor = 'Website') {
   return publicJoin(row);
 }
 
-export function createSessionRequest(customerId: string, input: { sport?: string; startAt?: string }) {
+function portalCustomer(customerId: string) {
   const customer = get<{
     id: string;
     name: string;
@@ -2178,22 +2260,59 @@ export function createSessionRequest(customerId: string, input: { sport?: string
     'SELECT id, name, mobile, email, dob, photo_url, govt_id_label, govt_id_url, plan_id, access_interest FROM customers WHERE id = ? AND cafe_id = ?',
     [customerId, CAFE_ID],
   );
-  if (!customer) throw new AppError(401, 'AUTH', 'Sign in to book a session.');
+  if (!customer) throw new AppError(401, 'AUTH', 'Sign in to continue.');
+  return customer;
+}
+
+function memberNote(parts: Array<string | undefined>) {
+  return parts.map((part) => text(part).slice(0, 400)).filter(Boolean).join('\n').slice(0, 2000);
+}
+
+export function listMemberSessions(customerId: string) {
+  return all<JoinRow>(
+    `${JOIN_SELECT} WHERE r.cafe_id = ? AND r.customer_id = ? AND r.kind = 'SESSION' ORDER BY r.created_at DESC LIMIT 120`,
+    [CAFE_ID, customerId],
+  ).map((row) => mapJoin(row));
+}
+
+export function createSessionRequest(customerId: string, input: { sport?: string; startAt?: string; purpose?: string; remarks?: string }) {
+  const customer = portalCustomer(customerId);
   const sport = matchActivity(text(input.sport));
-  if (!sport) throw new AppError(400, 'SPORT', 'Choose an activity.');
+  if (!sport) throw new AppError(400, 'SPORT', 'Choose a venue.');
   const start = new Date(String(input.startAt ?? ''));
   if (Number.isNaN(start.getTime())) throw new AppError(400, 'TIME', 'Choose a date and time.');
   const stamp = nowIso();
   const id = randomUUID();
   const ref = (get<{ n: number | null }>('SELECT MAX(ref_no) AS n FROM join_requests WHERE cafe_id = ?', [CAFE_ID])?.n ?? 0) + 1;
   const planId = customer.plan_id || 'plan_annual';
+  const notes = memberNote([text(input.purpose) || 'Session booking', input.remarks]);
   run(
     `INSERT INTO join_requests (id, cafe_id, ref_no, sport, name, mobile, email, dob, pincode, govt_id_label, govt_id_url, photo_url, password_hash, wants_trainer, trainer_id, preferred_slot, plan_id, amount, is_member, become_member, kind, customer_id, notes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, '', 0, '', ?, ?, 0, 1, 0, 'SESSION', ?, 'Session booking', ?, ?)`,
-    [id, CAFE_ID, ref, sport, customer.name, customer.mobile, customer.email, customer.dob, customer.govt_id_label || 'Session', customer.govt_id_url, customer.photo_url, start.toISOString(), planId, customerId, stamp, stamp],
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, '', 0, '', ?, ?, 0, 1, 0, 'SESSION', ?, ?, ?, ?)`,
+    [id, CAFE_ID, ref, sport, customer.name, customer.mobile, customer.email, customer.dob, customer.govt_id_label || 'Session', customer.govt_id_url, customer.photo_url, start.toISOString(), planId, customerId, notes, stamp, stamp],
   );
   audit('Website', 'SESSION_REQUEST', 'join', id, `${customer.name} · ${sport} · ${requestSlotLabel(start.toISOString())}`);
   notify('staff', 'New session request', `${joinRef(ref)} · ${customer.name} · ${sport} · ${requestSlotLabel(start.toISOString())}`);
+  return getJoinRequest(id);
+}
+
+export function createReportRequest(customerId: string, input: { issue?: string; remarks?: string }) {
+  const customer = portalCustomer(customerId);
+  const issue = text(input.issue).slice(0, 800);
+  if (issue.length < 4) throw new AppError(400, 'REPORT', 'Say what the issue is.');
+  const stamp = nowIso();
+  const id = randomUUID();
+  const ref = (get<{ n: number | null }>('SELECT MAX(ref_no) AS n FROM join_requests WHERE cafe_id = ?', [CAFE_ID])?.n ?? 0) + 1;
+  const planId = customer.plan_id || 'plan_annual';
+  const sport = listedArenas(customer.access_interest)[0] || 'Gym';
+  const notes = memberNote([issue, input.remarks]);
+  run(
+    `INSERT INTO join_requests (id, cafe_id, ref_no, sport, name, mobile, email, dob, pincode, govt_id_label, govt_id_url, photo_url, password_hash, wants_trainer, trainer_id, preferred_slot, plan_id, amount, is_member, become_member, kind, customer_id, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', 'Report', ?, ?, '', 0, '', '', ?, 0, 1, 0, 'REPORT', ?, ?, ?, ?)`,
+    [id, CAFE_ID, ref, sport, customer.name, customer.mobile, customer.email, customer.dob, customer.govt_id_url, customer.photo_url, planId, customerId, notes, stamp, stamp],
+  );
+  audit('Website', 'REPORT_FILED', 'join', id, `${customer.name} · ${issue.slice(0, 80)}`);
+  notify('staff', 'Member report', `${joinRef(ref)} · ${customer.name} · ${issue.slice(0, 80)}`);
   return getJoinRequest(id);
 }
 
@@ -2341,47 +2460,96 @@ export function markJoinContacted(id: string, actor: string) {
   return getJoinRequest(id);
 }
 
-export function approveJoinRequest(id: string, method: string | undefined, actor: string, notes?: string) {
-  const row = joinRow(id);
+export function approveJoinRequest(id: string, method: string | undefined, actor: string, notes?: string, assignTrainerId?: string) {
+  let row = joinRow(id);
   if (!JOIN_OPEN.includes(row.status)) throw new AppError(409, 'REQUEST', 'This request is already closed.');
+  if (row.kind !== 'REPORT' && assignTrainerId) {
+    const trainer = get<{ id: string; name: string }>('SELECT id, name FROM trainers WHERE id = ? AND cafe_id = ? AND is_active = 1', [assignTrainerId, CAFE_ID]);
+    if (!trainer) throw new AppError(400, 'TRAINER', 'That trainer is not available.');
+    if (!row.trainer_id || row.trainer_id !== trainer.id || row.wants_trainer !== 1) {
+      run(`UPDATE join_requests SET trainer_id = ?, wants_trainer = 1, updated_at = ? WHERE id = ?`, [trainer.id, nowIso(), id]);
+      row = joinRow(id);
+    }
+  }
+  if (row.kind === 'REPORT') {
+    run(
+      `UPDATE join_requests SET status = 'APPROVED', handled_by = ?, notes = COALESCE(?, notes), updated_at = ? WHERE id = ?`,
+      [actor, notes === undefined ? null : notes.slice(0, 2000), nowIso(), id],
+    );
+    audit(actor, 'REPORT_SEEN', 'join', id, row.name);
+    return getJoinRequest(id);
+  }
   if (row.kind === 'SESSION') {
     if (!row.customer_id) throw new AppError(400, 'MEMBER', 'This session is not tied to a member.');
     if (!row.preferred_slot || Number.isNaN(Date.parse(row.preferred_slot))) throw new AppError(400, 'TIME', 'This session has no time.');
     const facility = facilityForSport(row.sport);
     if (!facility) throw new AppError(400, 'FACILITY', 'No court is set up for that sport.');
     const customer = get<{ name: string; mobile: string }>('SELECT name, mobile FROM customers WHERE id = ?', [row.customer_id]);
+    const trainerName = row.trainer_id
+      ? get<{ name: string }>('SELECT name FROM trainers WHERE id = ?', [row.trainer_id])?.name
+      : '';
+    if (row.trainer_id) run('UPDATE customers SET coach_id = ? WHERE id = ?', [row.trainer_id, row.customer_id]);
     createBooking({
       facilityId: facility.id,
       customerId: row.customer_id,
       memberName: customer?.name || row.name,
       memberMobile: customer?.mobile || row.mobile,
       startAt: row.preferred_slot,
-      notes: 'Member session request',
+      notes: [row.notes || 'Member session request', trainerName ? `Trainer: ${trainerName}` : ''].filter(Boolean).join('\n'),
     }, actor);
     run(
       `UPDATE join_requests SET status = 'APPROVED', handled_by = ?, notes = COALESCE(?, notes), updated_at = ? WHERE id = ?`,
       [actor, notes === undefined ? null : notes.slice(0, 2000), nowIso(), id],
     );
-    audit(actor, 'SESSION_APPROVED', 'join', id, `${row.sport} · ${requestSlotLabel(row.preferred_slot)}`);
+    audit(actor, 'SESSION_APPROVED', 'join', id, `${row.sport} · ${requestSlotLabel(row.preferred_slot)}${trainerName ? ` · ${trainerName}` : ''}`);
     return getJoinRequest(id);
   }
   if (row.wants_trainer === 1 && !row.trainer_id) throw new AppError(400, 'TRAINER', 'Choose a trainer before approving.');
-  if (!row.plan_id) throw new AppError(400, 'PLAN', 'Choose a membership plan before approving.');
-  if (!row.mobile) throw new AppError(400, 'MOBILE', 'Enter a phone number before approving.');
+  const trainerSimple = Boolean(assignTrainerId) && row.wants_trainer === 1;
+  if (!row.plan_id) {
+    if (trainerSimple) {
+      const fallback = get<{ id: string; price: number }>('SELECT id, price FROM membership_plans WHERE cafe_id = ? AND is_active = 1 ORDER BY duration_days ASC, price ASC LIMIT 1', [CAFE_ID])
+        ?? get<{ id: string; price: number }>('SELECT id, price FROM membership_plans WHERE id = ?', ['plan_monthly']);
+      if (!fallback) throw new AppError(400, 'PLAN', 'No membership plan is set up yet.');
+      run(`UPDATE join_requests SET plan_id = ?, amount = ?, updated_at = ? WHERE id = ?`, [fallback.id, fallback.price, nowIso(), id]);
+      row = joinRow(id);
+    } else {
+      throw new AppError(400, 'PLAN', 'Choose a membership plan before approving.');
+    }
+  }
+  if (!row.mobile) {
+    if (trainerSimple) {
+      const stub = `0${String(row.ref_no).replace(/\D/g, '').padStart(9, '0').slice(-9)}`;
+      run(`UPDATE join_requests SET mobile = ?, updated_at = ? WHERE id = ?`, [stub, nowIso(), id]);
+      row = joinRow(id);
+    } else {
+      throw new AppError(400, 'MOBILE', 'Enter a phone number before approving.');
+    }
+  }
   if (row.wants_trainer === 1 && row.preferred_slot && heldSlotSet(row.trainer_id, row.id).has(row.preferred_slot)) {
-    throw new AppError(409, 'SLOT', `${row.trainer_name ?? 'The trainer'} already has someone at ${slotLabel(row.preferred_slot)}. Pick another time first.`);
+    if (trainerSimple) {
+      run(`UPDATE join_requests SET preferred_slot = '', updated_at = ? WHERE id = ?`, [nowIso(), id]);
+      row = joinRow(id);
+    } else {
+      throw new AppError(409, 'SLOT', `${row.trainer_name ?? 'The trainer'} already has someone at ${slotLabel(row.preferred_slot)}. Pick another time first.`);
+    }
   }
   const pay = method === 'CASH' || method === 'UPI' || method === 'CARD' ? method : null;
-  if (row.payment_status !== 'PAID' && !pay) throw new AppError(400, 'PAYMENT', 'Choose how the payment was taken: cash, UPI, or card.');
+  const trainerApproveWithoutPay = row.wants_trainer === 1 && !pay && row.payment_status !== 'PAID';
+  if (row.payment_status !== 'PAID' && !pay && row.wants_trainer !== 1) {
+    throw new AppError(400, 'PAYMENT', 'Choose how the payment was taken: cash, UPI, or card.');
+  }
   tx(() => {
-    const customerId = row.payment_status === 'PAID'
+    const customerId = row.payment_status === 'PAID' || trainerApproveWithoutPay
       ? ensureJoinCustomer(row, actor)
       : settleJoin(row, pay!, pay === 'CASH' ? 'Cash' : pay === 'UPI' ? 'UPI' : 'Card', '', actor);
     if (!activeMembership(customerId)?.active) assignPlan(customerId, row.plan_id, actor);
     if (row.trainer_id) run('UPDATE customers SET coach_id = ? WHERE id = ?', [row.trainer_id, customerId]);
     run(`UPDATE join_requests SET status = 'APPROVED', customer_id = ?, handled_by = ?, notes = COALESCE(?, notes), updated_at = ? WHERE id = ?`, [customerId, actor, notes === undefined ? null : notes.slice(0, 2000), nowIso(), id]);
   });
-  audit(actor, 'JOIN_APPROVED', 'join', id, `${row.plan_name ?? 'Plan'} is active`);
+  audit(actor, 'JOIN_APPROVED', 'join', id, trainerApproveWithoutPay
+    ? `${row.plan_name ?? 'Plan'} · trainer assigned · payment due at desk`
+    : `${row.plan_name ?? 'Plan'} is active`);
   const approved = getJoinRequest(id);
   if (row.trainer_id && approved.customerId) {
     const trainer = get<{ name: string; specialization: string }>('SELECT name, specialization FROM trainers WHERE id = ?', [row.trainer_id]);
@@ -2461,7 +2629,7 @@ export function seedGymkhana() {
     { id: 'user_manager', name: 'Gymkhana Manager', email: 'manager@gymkhana.local', role: 'MANAGER', phone: '9000000001', specialization: 'Operations' },
     { id: 'user_reception', name: 'Reception', email: 'reception@gymkhana.local', role: 'RECEPTIONIST', phone: '9000000002', specialization: 'Front desk' },
     { id: 'user_cashier', name: 'Cashier', email: 'cashier@gymkhana.local', role: 'CASHIER', phone: '9000000003', specialization: 'Payments' },
-    { id: 'user_coach', name: 'Head Coach', email: 'coach@gymkhana.local', role: 'COACH', phone: '9000000004', specialization: 'Badminton' },
+    { id: 'user_coach', name: 'Neha Kapoor', email: 'neha.kapoor@gymkhana.local', role: 'COACH', phone: '9810000001', specialization: 'Badminton' },
     { id: 'user_facility', name: 'Facility Manager', email: 'facilities@gymkhana.local', role: 'FACILITY_MANAGER', phone: '9000000005', specialization: 'Courts' },
     { id: 'user_inventory', name: 'Inventory', email: 'inventory@gymkhana.local', role: 'INVENTORY_MANAGER', phone: '9000000006', specialization: 'Stores' },
   ];
@@ -2471,6 +2639,10 @@ export function seedGymkhana() {
         `INSERT OR IGNORE INTO users (id, cafe_id, name, email, password_hash, role, created_at, phone, specialization, schedule_json)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [user.id, CAFE_ID, user.name, user.email, staffPassword.password_hash, user.role, nowIso(), user.phone, user.specialization, 'Mon–Sat 08:00–18:00'],
+      );
+      run(
+        `UPDATE users SET name = ?, email = ?, role = ?, phone = ?, specialization = ? WHERE id = ?`,
+        [user.name, user.email, user.role, user.phone, user.specialization, user.id],
       );
     }
   }
@@ -3042,7 +3214,7 @@ export function registerGymRoutes(
     audit(actor(req).name, 'MAINTENANCE', 'facility', id, title);
     res.json({ facilities: listFacilities() });
   }));
-  app.post('/api/gym/maintenance', allow('FACILITY_MANAGER', 'RECEPTIONIST'), wrap((req, res) => {
+  app.post('/api/gym/maintenance', allow('FACILITY_MANAGER', 'RECEPTIONIST', 'COACH'), wrap((req, res) => {
     const facilityId = String(req.body?.facilityId ?? '');
     const title = String(req.body?.title ?? '').trim();
     if (!facilityId || !title) throw new AppError(400, 'MAINTENANCE', 'Choose a facility and a task.');
@@ -3064,7 +3236,7 @@ export function registerGymRoutes(
     audit(who, 'MAINTENANCE', 'maintenance', id, title);
     res.json({ id });
   }));
-  app.patch('/api/gym/maintenance/:id', allow('FACILITY_MANAGER', 'RECEPTIONIST'), wrap((req, res) => {
+  app.patch('/api/gym/maintenance/:id', allow('FACILITY_MANAGER', 'RECEPTIONIST', 'COACH'), wrap((req, res) => {
     const id = String(req.params.id);
     const row = get<{ facility_id: string; title: string; notes: string; category: string; priority: string; assigned_to: string; cost: number }>(
       'SELECT facility_id, title, notes, category, priority, assigned_to, cost FROM maintenance_records WHERE id = ? AND cafe_id = ?',
@@ -3083,7 +3255,7 @@ export function registerGymRoutes(
     audit(actor(req).name, 'EDIT_TASK', 'maintenance', id, title);
     res.json({ id });
   }));
-  app.get('/api/gym/maintenance', allow('FACILITY_MANAGER', 'RECEPTIONIST'), wrap((_req, res) => {
+  app.get('/api/gym/maintenance', allow('FACILITY_MANAGER', 'RECEPTIONIST', 'COACH'), wrap((_req, res) => {
     res.json({
       records: all(
         `SELECT m.id, m.title, m.notes, m.status, m.starts_at, m.ends_at, m.actor, m.facility_id, m.category, m.priority, m.assigned_to, m.cost,
@@ -3093,7 +3265,7 @@ export function registerGymRoutes(
       ),
     });
   }));
-  app.post('/api/gym/maintenance/:id/close', allow('FACILITY_MANAGER', 'RECEPTIONIST'), wrap((req, res) => {
+  app.post('/api/gym/maintenance/:id/close', allow('FACILITY_MANAGER', 'RECEPTIONIST', 'COACH'), wrap((req, res) => {
     const row = get<{ facility_id: string }>('SELECT facility_id FROM maintenance_records WHERE id = ?', [String(req.params.id)]);
     if (!row) throw new AppError(404, 'MAINTENANCE', 'Record not found.');
     run(`UPDATE maintenance_records SET status = 'CLOSED', ends_at = ? WHERE id = ?`, [nowIso(), String(req.params.id)]);
@@ -3189,35 +3361,126 @@ export function registerGymRoutes(
     );
     res.json({ ok: true });
   }));
+  app.get('/api/gym/me/trainer', allow('COACH', 'RECEPTIONIST', 'CASHIER', 'FACILITY_MANAGER', 'MANAGER'), wrap((req, res) => {
+    const linked = trainerForStaff({
+      id: req.user?.id,
+      email: req.user?.email,
+      phone: get<{ phone: string }>('SELECT phone FROM users WHERE id = ?', [req.user?.id ?? ''])?.phone,
+      name: req.user?.name,
+    });
+    res.json(linked ?? { trainer: null, classes: [], sessions: [], heldSlots: [] });
+  }));
+  app.post('/api/gym/me/trainer/claim', allow('COACH', 'SUPER_ADMIN', 'MANAGER'), wrap((req, res) => {
+    if (!req.user?.id) throw new AppError(401, 'AUTH', 'Sign in again.');
+    res.json(claimTrainerForUser(req.user.id, String(req.body?.trainerId ?? '')));
+  }));
+  app.patch('/api/gym/me/trainer', allow('COACH'), wrap((req, res) => {
+    const staff = {
+      id: req.user?.id,
+      email: req.user?.email,
+      phone: get<{ phone: string }>('SELECT phone FROM users WHERE id = ?', [req.user?.id ?? ''])?.phone,
+      name: req.user?.name,
+    };
+    res.json(saveMyTrainerSlots(staff, req.body?.freeSlots, actor(req).name));
+  }));
   app.get('/api/gym/trainers', allow('COACH', 'RECEPTIONIST', 'CASHIER', 'FACILITY_MANAGER'), wrap((_req, res) => {
     res.json({ trainers: listTrainers() });
   }));
   app.get('/api/gym/trainers/:id', allow('COACH', 'RECEPTIONIST', 'CASHIER', 'FACILITY_MANAGER'), wrap((req, res) => {
     res.json(trainerProfile(String(req.params.id)));
   }));
-  app.post('/api/gym/trainers', allow('COACH', 'MANAGER'), wrap((req, res) => {
+  app.post('/api/gym/trainers', allow('MANAGER'), wrap((req, res) => {
     res.json(saveTrainer(req.body ?? {}, actor(req).name));
   }));
   app.patch('/api/gym/trainers/:id', allow('COACH', 'MANAGER'), wrap((req, res) => {
+    if (req.user?.role === 'COACH') {
+      const linked = trainerForStaff({
+        id: req.user.id,
+        email: req.user.email,
+        phone: get<{ phone: string }>('SELECT phone FROM users WHERE id = ?', [req.user.id])?.phone,
+      });
+      if (!linked?.trainer || linked.trainer.id !== String(req.params.id)) {
+        throw new AppError(403, 'FORBIDDEN', 'You can only edit your own trainer profile.');
+      }
+      const trainer = linked.trainer;
+      res.json(saveTrainer({
+        id: trainer.id,
+        name: trainer.name,
+        phone: trainer.phone,
+        email: trainer.email,
+        specialization: trainer.specialization,
+        isActive: trainer.isActive,
+        govtIdLabel: trainer.govtIdLabel,
+        govtIdUrl: trainer.govtIdUrl,
+        notes: typeof req.body?.notes === 'string' ? req.body.notes : trainer.notes,
+        offers: trainer.offers,
+        freeSlots: req.body?.freeSlots ?? trainer.freeSlots,
+        availability: typeof req.body?.availability === 'string' ? req.body.availability : trainer.availability,
+      }, actor(req).name));
+      return;
+    }
     res.json(saveTrainer({ ...(req.body ?? {}), id: String(req.params.id) }, actor(req).name));
   }));
   app.get('/api/gym/join-requests', allow('COACH', 'RECEPTIONIST', 'CASHIER'), wrap((req, res) => {
-    res.json({ requests: listJoinRequests(String(req.query.route ?? '')), idTypes: ID_TYPES });
+    const route = String(req.query.route ?? '');
+    if (req.user?.role === 'COACH' && route !== 'TRAINER') {
+      res.json({ requests: listJoinRequests('TRAINER'), idTypes: ID_TYPES });
+      return;
+    }
+    res.json({ requests: listJoinRequests(route), idTypes: ID_TYPES });
   }));
   app.get('/api/gym/join-requests/:id', allow('COACH', 'RECEPTIONIST', 'CASHIER'), wrap((req, res) => {
-    res.json({ request: getJoinRequest(String(req.params.id)), idTypes: ID_TYPES });
+    const request = getJoinRequest(String(req.params.id));
+    if (req.user?.role === 'COACH' && request.route !== 'TRAINER') {
+      throw new AppError(403, 'FORBIDDEN', 'Trainers only handle coaching requests.');
+    }
+    res.json({ request, idTypes: ID_TYPES });
   }));
   app.patch('/api/gym/join-requests/:id', allow('COACH', 'RECEPTIONIST', 'CASHIER'), wrap((req, res) => {
+    const request = getJoinRequest(String(req.params.id));
+    if (req.user?.role === 'COACH' && request.route !== 'TRAINER') {
+      throw new AppError(403, 'FORBIDDEN', 'Trainers only handle coaching requests.');
+    }
     res.json({ request: updateJoinRequest(String(req.params.id), req.body ?? {}, actor(req).name) });
   }));
   app.post('/api/gym/join-requests/:id/contacted', allow('COACH', 'RECEPTIONIST', 'CASHIER'), wrap((req, res) => {
+    const request = getJoinRequest(String(req.params.id));
+    if (req.user?.role === 'COACH' && request.route !== 'TRAINER') {
+      throw new AppError(403, 'FORBIDDEN', 'Trainers only handle coaching requests.');
+    }
     res.json({ request: markJoinContacted(String(req.params.id), actor(req).name) });
   }));
   app.post('/api/gym/join-requests/:id/approve', allow('COACH', 'RECEPTIONIST', 'CASHIER'), wrap((req, res) => {
+    const request = getJoinRequest(String(req.params.id));
+    if (req.user?.role === 'COACH' && request.route !== 'TRAINER') {
+      throw new AppError(403, 'FORBIDDEN', 'Trainers only handle coaching requests.');
+    }
     const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;
-    res.json({ request: approveJoinRequest(String(req.params.id), req.body?.method ? String(req.body.method) : undefined, actor(req).name, notes) });
+    let assignTrainerId = typeof req.body?.trainerId === 'string' ? req.body.trainerId : undefined;
+    if (req.user?.role === 'COACH' && request.route === 'TRAINER') {
+      const linked = trainerForStaff({
+        id: req.user.id,
+        email: req.user.email,
+        phone: get<{ phone: string }>('SELECT phone FROM users WHERE id = ?', [req.user.id])?.phone,
+      });
+      assignTrainerId = linked?.trainer?.id || assignTrainerId;
+      if (!assignTrainerId) throw new AppError(400, 'TRAINER', 'Pick who you are on the trainer login first.');
+    }
+    res.json({
+      request: approveJoinRequest(
+        String(req.params.id),
+        req.body?.method ? String(req.body.method) : undefined,
+        actor(req).name,
+        notes,
+        assignTrainerId,
+      ),
+    });
   }));
   app.post('/api/gym/join-requests/:id/decline', allow('COACH', 'RECEPTIONIST', 'CASHIER'), wrap((req, res) => {
+    const request = getJoinRequest(String(req.params.id));
+    if (req.user?.role === 'COACH' && request.route !== 'TRAINER') {
+      throw new AppError(403, 'FORBIDDEN', 'Trainers only handle coaching requests.');
+    }
     const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;
     res.json(declineJoinRequest(String(req.params.id), String(req.body?.reason ?? ''), actor(req).name, notes));
   }));
@@ -3358,6 +3621,7 @@ export function registerGymRoutes(
       announcements: all('SELECT id, title, body, created_at FROM announcements WHERE cafe_id = ? ORDER BY created_at DESC', [CAFE_ID]),
       classes: all('SELECT id, name, category, schedule, duration_minutes, capacity, price, description, is_private FROM gym_classes WHERE cafe_id = ? AND is_active = 1', [CAFE_ID]),
       member,
+      sessions: customerId ? listMemberSessions(customerId) : [],
       razorpay: Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
     });
   }));
@@ -3431,7 +3695,8 @@ export function registerGymRoutes(
   }));
   app.post('/api/portal/gate', wrap((req, res) => {
     const incoming = typeof req.body?.memberToken === 'string' ? req.body.memberToken : '';
-    const result = scanActivityGate(String(req.body?.activity ?? ''), req.headers.cookie, incoming);
+    const activity = typeof req.body?.activity === 'string' ? req.body.activity : '';
+    const result = scanActivityGate(activity, req.headers.cookie, incoming);
     const customerId = readMemberId(req.headers.cookie, incoming);
     const memberToken = customerId ? memberPass(customerId) : '';
     if (customerId) res.setHeader('Set-Cookie', memberCookie(customerId, memberToken));
@@ -3477,11 +3742,27 @@ export function registerGymRoutes(
   app.get('/api/portal/slots', wrap((req, res) => {
     res.json(slotsFor(String(req.query.facilityId ?? ''), String(req.query.date ?? ''), Number(req.query.duration ?? 0)));
   }));
+  app.get('/api/portal/sessions', wrap((req, res) => {
+    const customerId = memberIdFrom(req);
+    if (!customerId) throw new AppError(401, 'AUTH', 'Sign in to see bookings.');
+    res.json({ requests: listMemberSessions(customerId) });
+  }));
   app.post('/api/portal/sessions', wrap((req, res) => {
     const customerId = memberIdFrom(req);
     if (!customerId) throw new AppError(401, 'AUTH', 'Sign in to book a session.');
-    const request = createSessionRequest(customerId, { sport: String(req.body?.sport ?? ''), startAt: String(req.body?.startAt ?? '') });
+    const request = createSessionRequest(customerId, {
+      sport: String(req.body?.sport ?? ''),
+      startAt: String(req.body?.startAt ?? ''),
+      purpose: String(req.body?.purpose ?? ''),
+      remarks: String(req.body?.remarks ?? ''),
+    });
     res.status(201).json({ request, note: 'Request sent to the desk.' });
+  }));
+  app.post('/api/portal/report', wrap((req, res) => {
+    const customerId = memberIdFrom(req);
+    if (!customerId) throw new AppError(401, 'AUTH', 'Sign in to send a report.');
+    const request = createReportRequest(customerId, { issue: String(req.body?.issue ?? ''), remarks: String(req.body?.remarks ?? '') });
+    res.status(201).json({ request, note: 'Report sent to the desk.' });
   }));
   app.post('/api/portal/bookings', wrap((req, res) => {
     const customerId = memberIdFrom(req);

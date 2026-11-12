@@ -3,7 +3,14 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import type { CustomerSummary, MenuCategory, MenuItem, Order } from '../../../../shared/domain';
 import { api } from '../../../lib/api';
 import { downloadExcel, type ExcelSheet } from '../../../lib/excel';
-import { deskLinkActive, EMPLOYEE_LINKS, isPeopleListPath } from '../staffSession';
+import {
+  deskLinkActive,
+  deskLinksFor,
+  DESK_HOMES,
+  getDeskMode,
+  isPeopleListPath,
+  trainerPathAllowed,
+} from '../staffSession';
 import { ActiveUserSubnav, CommunicationsSubnav } from '../gym/userNav';
 import { usePos } from '../PosContext';
 
@@ -201,6 +208,8 @@ function controlTitle(pathname: string) {
   if (pathname.includes('/backend/employees')) return 'Employees';
   if (pathname.includes('/backend/facilities')) return 'Activities';
   if (pathname.includes('/backend/maintenance')) return 'Maintenance';
+  if (pathname.includes('/backend/my-slots')) return 'My slots';
+  if (pathname.includes('/backend/trainer-requests')) return 'Trainer requests';
   if (pathname.includes('/backend/classes') || pathname.includes('/backend/participants')) return 'Classes & Coaching';
   if (pathname.includes('/backend/rentals')) return 'Equipment Rentals';
   if (pathname.includes('/backend/communications')) return 'Communications';
@@ -217,6 +226,9 @@ export function OdooBackendLayout() {
   const { user, signOut, items, orders, customers, categories } = usePos();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const desk = getDeskMode();
+  const trainerDesk = desk === 'trainer' || user?.role === 'COACH';
+  const links = deskLinksFor(trainerDesk ? 'trainer' : desk);
   const initial = (user?.name ?? 'S').trim().charAt(0).toUpperCase() || 'S';
   const [menuOpen, setMenuOpen] = useState(false);
   const [titleOpen, setTitleOpen] = useState(false);
@@ -228,9 +240,15 @@ export function OdooBackendLayout() {
   const menuRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLDivElement>(null);
   const title = controlTitle(pathname);
-  const peopleOn = deskLinkActive('/pos/backend/people', pathname);
-  const commsOn = deskLinkActive('/pos/backend/communications', pathname);
+  const peopleOn = !trainerDesk && deskLinkActive('/pos/backend/people', pathname);
+  const commsOn = !trainerDesk && deskLinkActive('/pos/backend/communications', pathname);
   const peopleList = isPeopleListPath(pathname);
+
+  useEffect(() => {
+    if (!trainerDesk) return;
+    if (trainerPathAllowed(pathname)) return;
+    navigate(DESK_HOMES.trainer, { replace: true });
+  }, [trainerDesk, pathname, navigate]);
 
   function setView(next: ChromeView) {
     setViewState(next);
@@ -281,15 +299,15 @@ export function OdooBackendLayout() {
       <header className="o-be-nav o-be-nav--light">
         <div className="o-be-nav__brand">
           <BrandMark />
-          <span>Gymkhana</span>
+          <span>{trainerDesk ? 'Trainer desk' : 'Gymkhana'}</span>
         </div>
         <nav className="o-be-nav__links o-be-nav__links--desk">
-          {EMPLOYEE_LINKS.map((item) => (
+          {links.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
-              end={'end' in item ? item.end : false}
-              className={() => `o-be-nav__link${deskLinkActive(item.to, pathname, 'end' in item && item.end) ? ' is-active' : ''}`}
+              end={'end' in item ? Boolean(item.end) : false}
+              className={() => `o-be-nav__link${deskLinkActive(item.to, pathname, 'end' in item && Boolean(item.end)) ? ' is-active' : ''}`}
             >
               {item.label}
             </NavLink>
@@ -319,15 +337,34 @@ export function OdooBackendLayout() {
             </button>
             {menuOpen ? (
               <div className="o-be-dropdown o-be-dropdown--right" role="menu" onClick={(e) => e.stopPropagation()}>
-                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/people'); }}>
-                  Active users
-                </button>
-                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/communications'); }}>
-                  Communications
-                </button>
-                <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/notifications'); }}>
-                  Notifications
-                </button>
+                {trainerDesk ? (
+                  <>
+                    <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/trainer-requests'); }}>
+                      Requests
+                    </button>
+                    <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/my-slots'); }}>
+                      My slots
+                    </button>
+                    <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/inventory'); }}>
+                      Inventory
+                    </button>
+                    <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/maintenance'); }}>
+                      Maintenance
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/people'); }}>
+                      Active users
+                    </button>
+                    <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/communications'); }}>
+                      Communications
+                    </button>
+                    <button type="button" role="menuitem" className="o-be-dropdown__item" onClick={() => { setMenuOpen(false); navigate('/pos/backend/notifications'); }}>
+                      Notifications
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   role="menuitem"

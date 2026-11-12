@@ -5,13 +5,11 @@ import { api } from '../../lib/api';
 import { readIdImage } from '../../lib/idImage';
 import { saveMemberPass } from '../../lib/memberPass';
 import { Dropdown } from '../pos/gym/record';
-import ball from './assets/ball.png';
-import curtains from './assets/curtains.jpg';
 import dumbbells from './assets/dumbbells.png';
-import star from './assets/star.png';
-import tiles from './assets/tiles.jpg';
+import { DoneScreen } from './DoneScreen';
 import { makeDemoMember } from './demoMember';
 import { readFile } from './photo';
+import { SilkFilm } from './silk';
 import './register.css';
 
 type Filed = {
@@ -67,12 +65,21 @@ export function RegisterPage() {
       setError('');
       if (slot === 'portrait') {
         if (!file.type.startsWith('image/')) throw new Error('Photograph is your personal photo.');
+        if (file.size > 8_000_000) throw new Error('Keep the photograph under 8 MB.');
         const url = await readFile(file);
         setPortrait(url);
         setPortraitName(file.name);
         return;
       }
-      if (!file.type.startsWith('image/')) throw new Error('Upload a photo of the ID, nothing else.');
+      if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        if (file.size > 1_000_000) throw new Error('Keep the ID file under 1 MB.');
+        const url = await readFile(file, true);
+        setIdPhoto(url);
+        setIdName(file.name);
+        return;
+      }
+      if (!file.type.startsWith('image/')) throw new Error('Upload a photo or PDF of the ID.');
+      if (file.size > 8_000_000) throw new Error('Keep the ID under 8 MB.');
       const shot = await readIdImage(file);
       setIdPhoto(shot);
       setIdName(file.name);
@@ -143,7 +150,7 @@ export function RegisterPage() {
         }),
       });
       saveMemberPass(data.memberToken);
-      navigate(next || '/member', { replace: true });
+      setFiled({ ref: data.request.ref, wantsTrainer: data.request.wantsTrainer });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not file this.');
     } finally {
@@ -152,24 +159,18 @@ export function RegisterPage() {
   }
 
   return (
-    <main className={`gkf${filed ? ' is-done' : ''}`} style={{ backgroundImage: `url(${filed ? tiles : curtains})` }}>
+    <main className={`gkf${filed ? ' is-done' : ''}`}>
+      <SilkFilm className="gkf-film" />
       {filed ? (
-        <section className="gkf-done" aria-live="polite">
-          <header className="gkf-done__head">
-            <Link to="/" className="gkf-done__mark">GYMKHANA</Link>
-            <p className="gkf-done__sector">SECTOR 19</p>
-          </header>
-          <img className="gkf-done__star" src={star} alt="" />
-          <p className="gkf-done__copy">
-            Your registration process has been completed. You will receive the final confirmation with login credentials on your registered mail ID.
-          </p>
-        </section>
+        <DoneScreen
+          copy="Your registration process has been Completed you will receive the final confirmation with login credentials on your registered mail id"
+          onContinue={() => navigate(next || '/member', { replace: true })}
+        />
       ) : (
       <div className="gkf-sheet">
         <header className="gkf-head">
           <Link to="/" className="gkf-mark">GYMKHANA</Link>
           <h1>REGISTRATION</h1>
-          <img className="gkf-orb" src={ball} alt="" />
         </header>
           <form className="gkf-form" onSubmit={(event) => void submit(event)} noValidate>
             <button
@@ -281,7 +282,7 @@ export function RegisterPage() {
               >
                 <input
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept="image/*"
                   className="gkf-file"
                   onChange={(event: ChangeEvent<HTMLInputElement>) => void takeFile('portrait', event.target.files?.[0])}
                 />
@@ -291,13 +292,14 @@ export function RegisterPage() {
                     <em>{portraitName || 'Your photo'}</em>
                   </span>
                 ) : (
-                  <em>Your photo</em>
+                  <em>Upload gallery / document</em>
                 )}
               </label>
+              <p className="gkf-hint">Max size 8 MB · longest side compressed to 1600px</p>
             </div>
 
             <div className="gkf-field">
-              <span>Valid Government ID</span>
+              <span>Valid Government Id Proof</span>
               <label
                 className={`gkf-drop${over === 'id' ? ' is-over' : ''}${idPhoto ? ' is-held' : ''}`}
                 onDragOver={(event) => { event.preventDefault(); setOver('id'); }}
@@ -306,19 +308,20 @@ export function RegisterPage() {
               >
                 <input
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept="image/*,application/pdf"
                   className="gkf-file"
                   onChange={(event: ChangeEvent<HTMLInputElement>) => void takeFile('id', event.target.files?.[0])}
                 />
                 {idPhoto ? (
                   <span className="gkf-drop__held">
-                    <img src={idPhoto} alt="" />
+                    {idPhoto.startsWith('data:application/pdf') ? null : <img src={idPhoto} alt="" />}
                     <em>{idName || 'ID attached'}</em>
                   </span>
                 ) : (
-                  <em>Upload ID photo</em>
+                  <em>Upload gallery / document</em>
                 )}
               </label>
+              <p className="gkf-hint">Aadhaar, PAN, passport, licence or voter ID · photo or PDF under 1 MB</p>
             </div>
 
             {error ? <p className="gkf-error" role="alert">{error}</p> : null}

@@ -22,6 +22,7 @@ export function sportFromSlug(slug: string): ArenaSport | '' {
 
 export function gateNext(value: string | null | undefined) {
   const raw = (value ?? '').trim();
+  if (raw === '/in') return '/in';
   if (!raw.startsWith('/in/')) return '';
   if (/[?#\\]/.test(raw) || raw.includes('//', 1)) return '';
   const sport = sportFromSlug(raw.slice('/in/'.length));

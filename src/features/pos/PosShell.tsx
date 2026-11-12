@@ -22,6 +22,7 @@ import {
   ShiftPage,
   NotificationsPage,
   SessionsPage,
+  MySlotsPage,
   TrainerRequestsPage,
 } from './gym/centre';
 import { CommunicationsPage } from './gym/comms';
@@ -80,6 +81,7 @@ export default function PosShell() {
           <Route path="backend/trainers" element={<Navigate to="/pos/backend/classes" replace />} />
           <Route path="backend/trainer-requests" element={<TrainerRequestsPage />} />
           <Route path="backend/trainer-requests/:id" element={<JoinRequestRecordPage route="TRAINER" />} />
+          <Route path="backend/my-slots" element={<MySlotsPage />} />
           <Route path="backend/membership-requests" element={<Navigate to="/pos/backend/people?tab=requests" replace />} />
           <Route path="backend/membership-requests/:id" element={<JoinRequestRecordPage route="STAFF" />} />
           <Route path="backend/facilities/new" element={<FacilityRecordPage />} />

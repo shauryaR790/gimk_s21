@@ -541,10 +541,16 @@ assert.equal(deskApproved.status, 'APPROVED');
 assert.equal(deskApproved.paymentStatus, 'PAID');
 assert.equal(gym.memberProfile(deskApproved.customerId).member.membershipStatus, 'ACTIVE');
 const sessionAt = new Date('2027-08-20T09:00:00+05:30').toISOString();
-const sessionReq = gym.createSessionRequest(deskApproved.customerId, { sport: 'Badminton', startAt: sessionAt });
+const sessionReq = gym.createSessionRequest(deskApproved.customerId, { sport: 'Badminton', startAt: sessionAt, purpose: 'Practice', remarks: 'Court 2' });
 assert.equal(sessionReq.kind, 'SESSION');
 assert.equal(sessionReq.sport, 'Badminton');
+assert.match(sessionReq.notes, /Practice/);
+assert.equal(gym.listMemberSessions(deskApproved.customerId)[0]?.id, sessionReq.id);
 assert.equal(gym.approveJoinRequest(sessionReq.id, undefined, 'desk').status, 'APPROVED');
+const filedReport = gym.createReportRequest(deskApproved.customerId, { issue: 'Net torn on court 1', remarks: 'After evening play' });
+assert.equal(filedReport.kind, 'REPORT');
+assert.match(filedReport.notes, /Net torn/);
+assert.equal(gym.approveJoinRequest(filedReport.id, undefined, 'desk').status, 'APPROVED');
 
 const trainerJoin = gym.createJoinRequest({ ...joinBase, sport: 'Badminton', name: 'Ira Sen', mobile: '9876543211', wantsTrainer: true, trainerId: 'trainer_head', preferredSlot: 'Mon 07:00', planId: 'plan_quarterly' });
 assert.equal(gym.getJoinRequest(trainerJoin.id).route, 'TRAINER');
@@ -607,10 +613,14 @@ assert.equal(signupFull.pincode, '400001');
 assert.equal(signupFull.becomeMember, true);
 assert.equal(signupFull.trainerName, '');
 assert.throws(() => gym.approveJoinRequest(signup.id, 'CASH', 'desk'), /trainer/i);
-gym.updateJoinRequest(signup.id, { trainerId: 'trainer_imran', planId: 'plan_monthly', mobile: '9876543299' }, 'desk');
+const trainerDeskOk = gym.approveJoinRequest(signup.id, undefined, 'Neha Kapoor', undefined, 'trainer_imran');
+assert.equal(trainerDeskOk.status, 'APPROVED');
+assert.equal(trainerDeskOk.trainerId, 'trainer_imran');
+assert.ok(trainerDeskOk.planId);
+assert.equal(gym.memberProfile(trainerDeskOk.customerId).member.coachId, 'trainer_imran');
 const assigned = gym.getJoinRequest(signup.id);
 assert.equal(assigned.trainerId, 'trainer_imran');
-assert.equal(assigned.planId, 'plan_monthly');
+assert.ok(assigned.planId);
 
 const deskSignup = gym.createJoinRequest({
   signup: true,
@@ -666,6 +676,15 @@ assert.equal(gateByPass.name, gym.memberProfile(deskApproved.customerId).member.
 const gateByCookie = gym.scanActivityGate('table-tennis', `gym_member=${encodeURIComponent(pass)}`);
 assert.equal(gateByCookie.sport, 'Table tennis');
 assert.equal(gateByCookie.already, false);
+const doorIn = gym.scanActivityGate('', undefined, pass);
+assert.equal(doorIn.door, true);
+assert.ok(doorIn.sport);
+assert.ok(doorIn.facility);
+assert.equal(doorIn.name, gym.memberProfile(deskApproved.customerId).member.name);
+const insideNow = gym.listMembers('in').find((row) => row.id === deskApproved.customerId);
+assert.ok(insideNow);
+assert.equal(insideNow.hereNow, doorIn.facility);
+assert.equal(insideNow.hereSport, doorIn.sport);
 
 assert.equal(fillTemplate('Hello {{name}}, id {{membership_id}}.', { name: 'Asha', membership_id: 'GK1' }), 'Hello Asha, id GK1.');
 const comms = await import('./comms');

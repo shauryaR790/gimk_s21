@@ -1,0 +1,120 @@
+@font-face {
+  font-family: 'Pillar';
+  src: url('./assets/Pillar.ttf') format('truetype');
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Alumni Sans Collegiate One';
+  src: url('./assets/AlumniSansCollegiateOne.ttf') format('truetype');
+  font-display: block;
+}
+
+.gk-done {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100dvh;
+  padding: 52px 28px 36px;
+  text-align: center;
+  animation: gk-done-in 0.55s cubic-bezier(0.22, 0.82, 0.24, 1);
+}
+
+.gk-done__head {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+}
+
+.gk-done__mark {
+  color: #fff;
+  font-family: 'Pillar', 'Anton', sans-serif;
+  font-size: clamp(64px, 18vw, 108px);
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  line-height: 0.82;
+  text-decoration: none;
+}
+
+.gk-done__sector {
+  margin: 0;
+  color: #fff;
+  font-family: 'Pillar', 'Anton', sans-serif;
+  font-size: clamp(18px, 5vw, 28px);
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  line-height: 1;
+}
+
+.gk-done__go {
+  display: inline-block;
+  margin: 18px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+  font-family: 'Pillar', 'Anton', sans-serif;
+  font-size: clamp(28px, 8vw, 42px);
+  letter-spacing: 0.08em;
+  line-height: 0.9;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.gk-done__star {
+  width: min(78vw, 460px);
+  height: auto;
+  margin: auto;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.45));
+}
+
+.gk-done__copy {
+  margin: 0;
+  width: min(94vw, 1100px);
+  color: #f6f6f6;
+  font-family: 'Alumni Sans Collegiate One', 'Anton', sans-serif;
+  font-size: clamp(26px, 6.2vw, 40px);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 0.98;
+  text-transform: uppercase;
+  text-wrap: balance;
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes gk-done-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.gk-route {
+  animation: gk-route-in 0.48s cubic-bezier(0.22, 0.82, 0.24, 1);
+}
+
+@keyframes gk-route-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gk-done,
+  .gk-route {
+    animation: none;
+  }
+}

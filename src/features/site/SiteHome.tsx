@@ -2,20 +2,30 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { readMemberPass } from '../../lib/memberPass';
 import { SIGNUP_ACTIVITIES } from '../../../shared/activities';
-import film from './assets/bgjimk.mp4';
-import filmPoster from './assets/bgjimk-poster.jpg';
+import ball from './assets/ball.png';
+import dumbbells from './assets/dumbbells.png';
+import grain from './assets/grain-rect.png';
 import grid from './assets/grid.jpg';
 import orb from './assets/orb.png';
+import queen from './assets/queen.png';
 import star from './assets/star.png';
-import { SportMark } from './sportMarks';
+import stripes from './assets/stripes.png';
+import { SilkFilm } from './silk';
 import './site.css';
 
-const ACTIVITIES = SIGNUP_ACTIVITIES;
+const ACTIVITIES = [
+  'Badminton',
+  'Basketball',
+  'Gym',
+  'Skating',
+  'Swimming',
+  'Tennis',
+  'Table tennis',
+] as const satisfies readonly (typeof SIGNUP_ACTIVITIES)[number][];
 
 const ACTIVITY_COPY: Record<(typeof ACTIVITIES)[number], string> = {
   Badminton: 'Morning smash sessions through late mixed doubles. Walk in or lock a slot.',
   Basketball: 'Full-court nights, half-court mornings, and open shootaround on off-league days.',
-  Football: 'Floodlit five-a-side, seven-a-side, and weekend friendlies. Boots on, play.',
   Gym: 'Racks, strength floor, and trainers on site. Come for a lift or a programme.',
   Skating: 'Rink hours for learners and regulars — figure, speed, and open skate.',
   Swimming: 'Lap lanes and leisure hours. Early club, stroke coaching, evening lengths.',
@@ -59,6 +69,7 @@ const HERO_CELLS = HERO_ROWS.slice(0, -1).flatMap((y, row) => {
 function Hero() {
   return (
     <section className="gkh">
+      <SilkFilm className="gkh-film" startAt={0} />
       <div className="gkh-sticky">
         <div className="gkh-fit" aria-hidden="true">
           <img className="gkh-fit__photo" src={grid} alt="" />
@@ -77,6 +88,7 @@ function Hero() {
             ))}
           </div>
         </div>
+        <div className="gkh-galacticos" aria-hidden="true" />
         <div className="gkh-stage">
           <p className="gkh-sector">SECTOR 19</p>
           <img className="gkh-star" src={star} alt="" />
@@ -88,22 +100,41 @@ function Hero() {
 
 function Activities() {
   const [ref, inView] = useInView<HTMLElement>();
+  const [open, setOpen] = useState<(typeof ACTIVITIES)[number] | null>(null);
   return (
-    <section ref={ref} id="activities" className={`gka${inView ? ' is-in' : ''}`}>
+    <section
+      ref={ref}
+      id="activities"
+      className={`gka${inView ? ' is-in' : ''}`}
+      style={{ backgroundImage: `url(${grain})` }}
+    >
+      <div className="gka-stripes" style={{ backgroundImage: `url(${stripes})` }} />
+      <div className="gka-bar" />
+      <img className="gka-queen" src={queen} alt="" />
+      <img className="gka-ball" src={ball} alt="" />
+      <img className="gka-dumbbells" src={dumbbells} alt="" />
       <h2 className="gka-title">ACTIVITIES</h2>
-      <div className="gka-board">
-        <ul className="gka-cards">
-          {ACTIVITIES.map((name, index) => (
-            <li key={name} className="gka-card" style={{ ['--i' as string]: index }}>
-              <div className="gka-card__copy">
-                <strong>{name}</strong>
-                <p>{ACTIVITY_COPY[name]}</p>
+      <ul className="gka-list">
+        {ACTIVITIES.map((name, index) => {
+          const expanded = open === name;
+          return (
+            <li key={name} className={`gka-item${expanded ? ' is-open' : ''}`} style={{ ['--i' as string]: index }}>
+              <button
+                type="button"
+                aria-expanded={expanded}
+                onClick={() => setOpen(expanded ? null : name)}
+              >
+                {name}
+              </button>
+              <div className="gka-item__body" aria-hidden={!expanded}>
+                <div className="gka-item__clip">
+                  <p className="gka-item__copy">{ACTIVITY_COPY[name]}</p>
+                </div>
               </div>
-              <SportMark sport={name} />
             </li>
-          ))}
-        </ul>
-      </div>
+          );
+        })}
+      </ul>
     </section>
   );
 }
@@ -112,10 +143,13 @@ function Register() {
   const [ref, inView] = useInView<HTMLElement>();
   return (
     <section ref={ref} id="register" className={`gkr${inView ? ' is-in' : ''}`}>
-      <h2 className="gkr-title" aria-hidden="true">GYMKHANA</h2>
-      <p className="gkr-sector">SECTOR 19</p>
-      <img className="gkr-star" src={star} alt="" />
-      <Link className="gkr-cta" to="/register">REGISTER NOW</Link>
+      <SilkFilm className="gkr-film" startAt={5.4} />
+      <div className="gkr-core">
+        <h2 className="gkr-title">GYMKHANA</h2>
+        <p className="gkr-sector">SECTOR 19</p>
+        <img className="gkr-star" src={star} alt="" />
+        <Link className="gkr-cta" to="/register">REGISTER<br />NOW</Link>
+      </div>
       <p className="gkr-contact">
         <a className="gkr-phone" href="tel:+911010100001">+91 10101 00001</a>
         <a className="gkr-mail" href="mailto:Contact@gymkhana.com">Contact@gymkhana.com</a>
@@ -127,7 +161,6 @@ function Register() {
 export function SiteHome() {
   const navigate = useNavigate();
   const scrollerRef = useRef<HTMLElement>(null);
-  const filmRef = useRef<HTMLVideoElement>(null);
   const [gate, setGate] = useState(false);
   useEffect(() => {
     document.title = 'Gymkhana · Sector 19';
@@ -150,25 +183,21 @@ export function SiteHome() {
       const range = hero instanceof HTMLElement
         ? Math.max(1, hero.offsetHeight)
         : root.clientHeight;
-      const next = Math.min(1, Math.max(0, root.scrollTop / range));
+      const heroT = Math.min(1, Math.max(0, root.scrollTop / (range * 0.8)));
+      const next = heroT * heroT * (3 - 2 * heroT);
+      const blendT = Math.min(1, Math.max(0, (root.scrollTop - range * 0.8) / (range * 0.2)));
+      const blend = blendT * blendT * blendT * (blendT * (blendT * 6 - 15) + 10);
       const register = root.querySelector('.gkr');
       let reg = 0;
-      if (next >= 0.98 && register instanceof HTMLElement && register.offsetHeight >= root.clientHeight * 0.85) {
+      if (register instanceof HTMLElement) {
         const top = yOf(register);
-        const shown = (root.scrollTop + root.clientHeight - top) / Math.max(1, register.offsetHeight);
-        const t = Math.min(1, Math.max(0, shown));
+        const t = Math.min(1, Math.max(0, (root.scrollTop + root.clientHeight - top) / Math.max(1, root.clientHeight)));
         reg = t * t * (3 - 2 * t);
       }
       root.style.setProperty('--hero', next.toFixed(4));
+      root.style.setProperty('--blend', blend.toFixed(4));
       root.style.setProperty('--reg', reg.toFixed(4));
       root.classList.toggle('is-docked', next >= 0.92 && reg < 0.08);
-      const filmNode = filmRef.current;
-      if (filmNode) {
-        const quiet = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        if (next >= 0.55 && !quiet) {
-          if (filmNode.paused) void filmNode.play();
-        } else if (!filmNode.paused) filmNode.pause();
-      }
     };
     const onScroll = () => {
       if (!frame) frame = window.requestAnimationFrame(update);
@@ -210,21 +239,8 @@ export function SiteHome() {
         </button>
       </header>
       <Hero />
-      <div className="gk-live">
-        <video
-          ref={filmRef}
-          className="gk-live__film"
-          muted
-          loop
-          playsInline
-          preload="none"
-          poster={filmPoster}
-        >
-          <source src={film} type="video/mp4" />
-        </video>
-        <Activities />
-        <Register />
-      </div>
+      <Activities />
+      <Register />
       {gate ? (
         <div className="gkh-gate" onClick={() => setGate(false)}>
           <div
