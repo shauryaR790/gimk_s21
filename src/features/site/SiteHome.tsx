@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom';
 import { readMemberPass } from '../../lib/memberPass';
 import { SIGNUP_ACTIVITIES } from '../../../shared/activities';
 import grid from './assets/grid.jpg';
-import orb from './assets/orb.png';
 import star from './assets/star.png';
 import { SilkFilm } from './silk';
 import './site.css';
@@ -148,7 +147,8 @@ function Register() {
 export function SiteHome() {
   const navigate = useNavigate();
   const scrollerRef = useRef<HTMLElement>(null);
-  const [gate, setGate] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const signedIn = Boolean(readMemberPass());
   useEffect(() => {
     document.title = 'Gymkhana · Sector 19';
     document.documentElement.classList.add('gks-page');
@@ -264,15 +264,15 @@ export function SiteHome() {
     };
   }, []);
   useEffect(() => {
-    if (!gate) return;
+    if (!menu) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setGate(false);
+      if (event.key === 'Escape') setMenu(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [gate]);
+  }, [menu]);
   return (
-    <main className="gks" ref={scrollerRef}>
+    <main className={`gks${menu ? ' is-menu' : ''}`} ref={scrollerRef}>
       <header className="gks-bar">
         <h1 className="gkh-title">
           <button
@@ -283,33 +283,61 @@ export function SiteHome() {
             GYMKHANA
           </button>
         </h1>
-        <button type="button" className="gkh-account" aria-label="Sign in or register" aria-haspopup="dialog" onClick={() => {
-          if (readMemberPass()) navigate('/member');
-          else setGate(true);
-        }}>
-          <img src={orb} alt="" />
+        <button
+          type="button"
+          className="gkh-burger"
+          aria-label={menu ? 'Close menu' : 'Open menu'}
+          aria-expanded={menu}
+          onClick={() => setMenu((open) => !open)}
+        >
+          <span /><span /><span />
         </button>
       </header>
+      <div className={`gkh-veil${menu ? ' is-on' : ''}`} onClick={() => setMenu(false)} />
+      <aside className={`gkh-side${menu ? ' is-open' : ''}`} aria-hidden={!menu}>
+        <nav className="gkh-side__nav">
+          <button
+            type="button"
+            className="gkh-side__link is-on"
+            onClick={() => {
+              setMenu(false);
+              scrollerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          >
+            Home
+          </button>
+          <button
+            type="button"
+            className="gkh-side__link"
+            onClick={() => {
+              setMenu(false);
+              document.getElementById('activities')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+          >
+            Activities
+          </button>
+          {signedIn ? (
+            <button
+              type="button"
+              className="gkh-side__link"
+              onClick={() => {
+                setMenu(false);
+                navigate('/member');
+              }}
+            >
+              Account
+            </button>
+          ) : (
+            <>
+              <Link className="gkh-side__link" to="/register" onClick={() => setMenu(false)}>Register</Link>
+              <Link className="gkh-side__link" to="/login" onClick={() => setMenu(false)}>Login</Link>
+            </>
+          )}
+        </nav>
+      </aside>
       <Hero />
       <Activities />
       <Register />
-      {gate ? (
-        <div className="gkh-gate" onClick={() => setGate(false)}>
-          <div
-            className="gkh-gate__card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="gkh-gate-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <p id="gkh-gate-title" className="gkh-gate__mark">GYMKHANA</p>
-            <Link className="gkh-gate__choice" to="/register">REGISTER</Link>
-            <p className="gkh-gate__or">or</p>
-            <Link className="gkh-gate__choice" to="/login">LOGIN</Link>
-            <button type="button" className="gkh-gate__close" onClick={() => setGate(false)}>Close</button>
-          </div>
-        </div>
-      ) : null}
     </main>
   );
 }

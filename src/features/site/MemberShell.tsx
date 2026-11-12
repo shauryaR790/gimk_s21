@@ -44,6 +44,7 @@ type Home = {
 };
 
 const LINKS = [
+  { to: '/', label: 'Home', end: true },
   { to: '/member', label: 'Dashboard', end: true },
   { to: '/member/bookings/mine', label: 'My Bookings', end: false },
   { to: '/member/bookings', label: 'Bookings', end: true },
