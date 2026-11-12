@@ -36,7 +36,6 @@ export async function printActivityQr(sport: string, slug: string) {
 }
 
 export async function printDoorQr() {
-  const url = await doorCheckInUrl();
   const src = await doorQrDataUrl(720);
   printQrHtml(
     `<article class="door">
