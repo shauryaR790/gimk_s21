@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ARENA_SPORTS, arenaSlug, sportFromSlug } from '../../../shared/activities';
+import { ARENA_SPORTS, sportFromSlug } from '../../../shared/activities';
 import { ApiError, api } from '../../lib/api';
 import { readMemberPass, saveMemberPass } from '../../lib/memberPass';
 import { SilkFilm } from './silk';
