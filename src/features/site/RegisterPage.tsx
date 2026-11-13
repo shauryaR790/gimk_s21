@@ -7,6 +7,7 @@ import { saveMemberPass } from '../../lib/memberPass';
 import { Dropdown } from '../pos/gym/record';
 import dumbbells from './assets/dumbbells.png';
 import { DoneScreen } from './DoneScreen';
+import { makeDemoMember } from './demoMember';
 import { readFile } from './photo';
 import { SilkFilm } from './silk';
 import './register.css';
@@ -46,6 +47,7 @@ export function RegisterPage() {
   const [filed, setFiled] = useState<Filed | null>(() => (
     import.meta.env.DEV && params.has('done') ? { ref: 'local', wantsTrainer: false } : null
   ));
+  const [demo, setDemo] = useState(false);
 
   useEffect(() => {
     document.title = 'Registration · Gymkhana';
@@ -144,6 +146,7 @@ export function RegisterPage() {
           photoUrl: portrait,
           govtIdUrl: idPhoto,
           wantsTrainer: trainer === 'yes',
+          demo,
         }),
       });
       saveMemberPass(data.memberToken);
@@ -170,9 +173,32 @@ export function RegisterPage() {
           <h1>REGISTRATION</h1>
         </header>
           <form className="gkf-form" onSubmit={(event) => void submit(event)} noValidate>
+            <button
+              type="button"
+              className="gkf-demo"
+              onClick={() => {
+                const pack = makeDemoMember(activity || 'Badminton');
+                setError('');
+                setDemo(true);
+                setFullName(pack.name);
+                setEmail(pack.email);
+                setPassword(pack.password);
+                setShowPassword(true);
+                setMobile(pack.mobile);
+                if (!activity) setActivity('Badminton');
+                setTrainer('no');
+                setPortrait(pack.portrait);
+                setPortraitName('demo-photo.jpg');
+                setIdPhoto(pack.idPhoto);
+                setIdName('demo-member-id.jpg');
+              }}
+            >
+              Use demo member
+            </button>
+
             <label className="gkf-field">
               <span>Full Name</span>
-              <input value={fullName} autoComplete="name" onChange={(event) => { setError(''); setFullName(event.target.value); }} />
+              <input value={fullName} autoComplete="name" onChange={(event) => { setError(''); setDemo(false); setFullName(event.target.value); }} />
             </label>
 
             <label className="gkf-field">

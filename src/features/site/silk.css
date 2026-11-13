@@ -14,16 +14,21 @@
   object-position: 50% 50%;
 }
 
+.gk-silk--mirror .gk-silk__film {
+  transform: scaleY(-1);
+  object-position: 50% 100%;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .gk-silk__film {
     visibility: hidden;
   }
 
   .gk-silk {
-    background: #4a1410 url('./assets/wavy-poster.jpg') 50% 50% / cover no-repeat;
+    background: #4a1410 url('./assets/bg-vid-poster.jpg') 50% 50% / cover no-repeat;
   }
 
   .gk-silk--mirror {
-    background: #4a1410 url('./assets/wavy-poster.jpg') 50% 100% / cover no-repeat;
+    background: #4a1410 url('./assets/bg-vid-poster.jpg') 50% 100% / cover no-repeat;
   }
 }

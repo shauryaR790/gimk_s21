@@ -48,14 +48,15 @@ html:has(.gks) *::-webkit-scrollbar {
   --blend: 0;
   --reg: 0;
   --hero-u: min(100vw / 1320, 100svh / 2868);
+  --act-u: min(100vw / 1326, 100svh / 2868);
   --title-top: calc(50svh - var(--hero-u) * 1039);
-  --nav-top: max(24px, calc(var(--hero-u) * 100));
-  --nav-left: max(18px, calc(var(--hero-u) * 40));
-  --nav-size: max(52px, calc(var(--hero-u) * 160));
-  --reg-page: 78dvh;
+  /* Docked GYMKHANA + hamburger share one top bar, opposite ends. */
+  --nav-top: max(18px, calc(var(--hero-u) * 72));
+  --nav-left: max(16px, calc(var(--hero-u) * 40));
+  --nav-size: max(44px, calc(var(--hero-u) * 140));
+  --reg-page: 100dvh;
   --reg-u: min(100vw / 1322, 100svh / 2868);
-  /* Short p3 rests at the bottom of the viewport — aim the morph there. */
-  --reg-top: calc(100dvh - var(--reg-page) * 0.5 - var(--reg-u) * 958);
+  --reg-top: calc(50dvh - var(--reg-u) * 958);
   --reg-full: calc(var(--reg-u) * 520);
   --hero-title: calc(var(--hero-u) * 500);
   height: 100%;
@@ -79,9 +80,10 @@ html:has(.gks) *::-webkit-scrollbar {
 }
 
 .gka {
-  height: 100vh;
-  height: 100dvh;
-  overflow: hidden;
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: auto;
+  overflow: visible;
 }
 
 /* Hero. Positions are in pixels of the 1320 × 2868 design frame; --u is one frame pixel. */
@@ -103,12 +105,21 @@ html:has(.gks) *::-webkit-scrollbar {
   background: transparent;
 }
 
-.gkh-film,
-.gka-film,
-.gkr-film {
-  position: absolute;
-  inset: 0;
+/* One sticky film under p1+p2 — continuous, then releases into p3. */
+.gks-silk-track {
+  position: relative;
   z-index: 0;
+}
+
+.gks-film {
+  position: sticky;
+  top: 0;
+  z-index: 0;
+  height: 100vh;
+  height: 100dvh;
+  margin-bottom: -100vh;
+  margin-bottom: -100dvh;
+  pointer-events: none;
 }
 
 .gkh-sticky {
@@ -195,9 +206,12 @@ html:has(.gks) *::-webkit-scrollbar {
 @media (min-aspect-ratio: 1/1) {
   .gks {
     --hero-u: min(100vw / 1320, 100svh / 2100);
+    --act-u: min(100vw / 1326, 100svh / 2300);
     --title-top: calc(50svh - var(--hero-u) * 877);
-    --reg-page: 72dvh;
+    --nav-top: max(16px, calc(var(--hero-u) * 56));
+    --reg-page: 100dvh;
     --reg-u: min(100vw / 1322, 100svh / 2300);
+    --reg-top: calc(50dvh - var(--reg-u) * 958);
   }
 
   .gkh {
@@ -210,7 +224,7 @@ html:has(.gks) *::-webkit-scrollbar {
   }
 }
 
-.gkh-title,
+.gkh-brand,
 .gkh-sector,
 .gka-title,
 .gkr-title,
@@ -222,74 +236,35 @@ html:has(.gks) *::-webkit-scrollbar {
   white-space: nowrap;
 }
 
-.gkh-title {
-  --h0: calc((1 - var(--hero)) * (1 - var(--reg)));
-  --h1: calc(var(--hero) * (1 - var(--reg)));
-  --h2: var(--reg);
-  position: fixed;
-  z-index: 8;
-  left: calc(50% * var(--h0) + var(--nav-left) * var(--h1) + 50% * var(--h2));
-  top: calc(var(--title-top) * var(--h0) + var(--nav-top) * var(--h1) + var(--reg-top) * var(--h2));
-  margin: 0;
-  width: max-content;
-  /* p1 red → p2 white → p3 red */
-  color: rgb(
-    calc(167 * (var(--h0) + var(--h2)) + 255 * var(--h1)),
-    calc(255 * var(--h1)),
-    calc(255 * var(--h1))
-  );
-  font-size: var(--nav-size);
+/* p1 hero title + sector — fixed 10px gap. */
+.gkh-lockup {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--u) * 430);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.gkh-brand {
+  position: static;
+  color: var(--red);
+  font-size: calc(var(--u) * 500);
   letter-spacing: 0.04em;
   line-height: 0.84;
-  text-align: left;
+  text-align: center;
   text-shadow:
     0 1px 0 rgba(0, 0, 0, 0.4),
     0 10px 28px rgba(0, 0, 0, 0.55);
-  transform-origin: calc(50% * (var(--h0) + var(--h2))) 0;
-  transform:
-    translateX(calc(-50% * (var(--h0) + var(--h2))))
-    scale(calc(
-      ((var(--hero-u) * 500) / var(--nav-size)) * var(--h0)
-      + var(--h1)
-      + (var(--reg-full) / var(--nav-size)) * var(--h2)
-    ));
-  pointer-events: none;
-  will-change: transform, top, left, color;
-}
-
-.gks.is-reg-snap .gkh-title {
-  transition:
-    transform 0.62s cubic-bezier(0.22, 0.7, 0.2, 1),
-    top 0.62s cubic-bezier(0.22, 0.7, 0.2, 1),
-    left 0.62s cubic-bezier(0.22, 0.7, 0.2, 1),
-    color 0.45s ease;
-}
-
-.gkh-title__mark {
-  display: block;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  line-height: inherit;
-  white-space: nowrap;
-  cursor: inherit;
-}
-
-.gks.is-docked .gkh-title {
-  pointer-events: auto;
-}
-
-.gks.is-docked .gkh-title__mark {
-  cursor: pointer;
 }
 
 .gkh-burger {
+  --burger-show: calc(var(--hero) * (1 - var(--reg)));
   position: absolute;
-  top: max(16px, var(--nav-top));
+  top: var(--nav-top);
   right: max(12px, calc(var(--hero-u) * 33));
   z-index: 30;
   display: flex;
@@ -297,20 +272,29 @@ html:has(.gks) *::-webkit-scrollbar {
   justify-content: center;
   gap: 7px;
   width: 44px;
-  height: 44px;
-  padding: 9px 7px;
+  height: var(--nav-size);
+  padding: 0 7px;
   border: 0;
   background: none;
   cursor: pointer;
+  opacity: var(--burger-show);
+  transform: translate3d(0, calc((1 - var(--burger-show)) * -10px), 0);
+  pointer-events: none;
+  will-change: opacity, transform;
+}
+
+.gks.is-docked:not(.is-reg) .gkh-burger,
+.gks.is-away:not(.is-reg) .gkh-burger,
+.gks.is-menu .gkh-burger {
   pointer-events: auto;
 }
 
 .gkh-burger span {
   display: block;
   width: 100%;
-  height: 4px;
+  height: 3px;
   border-radius: 99px;
-  background: #d4b483;
+  background: #fff;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
   transform-origin: 50% 50%;
   transition:
@@ -332,7 +316,7 @@ html:has(.gks) *::-webkit-scrollbar {
 }
 
 .gkh-burger:focus-visible {
-  outline: 2px solid #d4b483;
+  outline: 2px solid #fff;
   outline-offset: 3px;
 }
 
@@ -420,10 +404,7 @@ html:has(.gks) *::-webkit-scrollbar {
 }
 
 .gkh-sector {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(var(--u) * 844);
+  position: static;
   color: var(--red);
   font-size: calc(var(--u) * 100);
   line-height: 1;
@@ -434,7 +415,7 @@ html:has(.gks) *::-webkit-scrollbar {
 .gkh-star {
   position: absolute;
   left: calc(var(--u) * 37);
-  top: calc(var(--u) * 1012);
+  top: calc(var(--u) * 1012 + 20px);
   width: calc(var(--u) * 1246);
   height: auto;
   pointer-events: none;
@@ -442,15 +423,19 @@ html:has(.gks) *::-webkit-scrollbar {
   opacity: max(0, calc(1 - var(--hero) * 2.6));
 }
 
-/* Activities — Figma p2: silk film bg, cream type, red bullets. No decor imgs. */
+/* Activities — full open list, section grows with content (no inner scroll). */
 .gka {
   --u: min(100vw / 1326, 100svh / 2868);
   --mid: 1434;
   background: transparent;
-}
-
-.gka > :not(.gka-film) {
-  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding:
+    max(96px, calc(var(--u) * 280))
+    max(24px, calc(var(--u) * 120))
+    max(48px, calc(var(--u) * 160))
+    max(24px, calc(var(--u) * 128));
 }
 
 @media (min-aspect-ratio: 1/1) {
@@ -461,50 +446,33 @@ html:has(.gks) *::-webkit-scrollbar {
 }
 
 .gka > * {
-  position: absolute;
-}
-
-.gka-mark {
-  z-index: 4;
-  left: calc(50% + (128 - 663) * var(--u));
-  top: calc(50% + (210 - var(--mid)) * var(--u));
-  margin: 0;
-  color: var(--cream);
-  font-family: 'Pillar', 'Anton', sans-serif;
-  font-size: calc(var(--u) * 42);
-  font-weight: 400;
-  letter-spacing: 0.12em;
-  line-height: 1;
-  text-transform: uppercase;
+  position: relative;
+  z-index: 1;
 }
 
 .gka-title {
   z-index: 4;
-  left: calc(50% + (128 - 663) * var(--u));
-  top: calc(50% + (259 - var(--mid)) * var(--u));
-  margin: 0;
+  flex: 0 0 auto;
+  margin: -40px 0 max(20px, calc(var(--u) * 48));
   color: var(--cream);
   font-family: 'Pillar', 'Anton', sans-serif;
   font-size: calc(var(--u) * 300);
   font-weight: 400;
   letter-spacing: 0.05em;
   line-height: 0.84;
-  text-align: left;
+  text-align: center;
   text-transform: uppercase;
 }
 
 .gka-list {
   z-index: 4;
-  left: calc(50% + (200 - 663) * var(--u));
-  right: calc(var(--u) * 120);
-  top: calc(50% + (900 - var(--mid)) * var(--u));
-  bottom: calc(var(--u) * 160);
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: max(12px, calc(var(--u) * 28));
   margin: 0;
   padding: 0;
-  overflow: auto;
+  overflow: visible;
   list-style: none;
   color: var(--cream);
   font-family: 'Pillar', 'Anton', sans-serif;
@@ -517,21 +485,10 @@ html:has(.gks) *::-webkit-scrollbar {
 .gka-item {
   position: relative;
   margin: 0;
-  padding-left: calc(var(--u) * 48);
+  padding: 0;
 }
 
-.gka-item::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: calc(var(--u) * 74);
-  width: calc(var(--u) * 20);
-  height: calc(var(--u) * 20);
-  border-radius: 50%;
-  background: #8b1219;
-}
-
-.gka-item button {
+.gka-item__name {
   display: block;
   width: 100%;
   margin: 0;
@@ -542,12 +499,12 @@ html:has(.gks) *::-webkit-scrollbar {
   font: inherit;
   letter-spacing: inherit;
   line-height: inherit;
-  text-align: left;
+  text-align: center;
   text-transform: uppercase;
   cursor: pointer;
 }
 
-.gka-item button:focus-visible {
+.gka-item__name:focus-visible {
   outline: 2px solid #ece5d3;
   outline-offset: 4px;
 }
@@ -577,6 +534,7 @@ html:has(.gks) *::-webkit-scrollbar {
   font-weight: 400;
   letter-spacing: 0.01em;
   line-height: 1.4;
+  text-align: center;
   text-transform: none;
 }
 
@@ -613,16 +571,10 @@ html:has(.gks) *::-webkit-scrollbar {
       gk-star-live 6.4s ease-in-out 1.4s infinite;
   }
 
-  .gka-mark,
   .gka-title,
   .gka-item {
     opacity: 0;
     transition: opacity 0.7s ease, transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1);
-  }
-
-  .gka-mark {
-    transform: translateY(calc(var(--u) * -20));
-    transition-delay: 0.04s;
   }
 
   .gka-title {
@@ -635,7 +587,7 @@ html:has(.gks) *::-webkit-scrollbar {
     transition-delay: calc(0.25s + var(--i) * 70ms);
   }
 
-  .gka.is-in :is(.gka-mark, .gka-title, .gka-item) {
+  .gka.is-in :is(.gka-title, .gka-item) {
     opacity: 1;
     transform: none;
   }
@@ -645,8 +597,9 @@ html:has(.gks) *::-webkit-scrollbar {
   --u: min(100vw / 1322, 100svh / 2868);
   --mid: 1434;
   position: relative;
-  height: 78vh;
-  height: var(--reg-page, 78dvh);
+  z-index: 1;
+  height: 100vh;
+  height: var(--reg-page, 100dvh);
   overflow: hidden;
   background: transparent;
   scroll-snap-align: end;
@@ -662,9 +615,6 @@ html:has(.gks) *::-webkit-scrollbar {
 
 .gkr > * {
   position: absolute;
-}
-
-.gkr > :not(.gkr-film) {
   z-index: 1;
 }
 
@@ -679,17 +629,14 @@ html:has(.gks) *::-webkit-scrollbar {
 
 .gkr-title {
   top: calc(50% + (476 - var(--mid)) * var(--u));
-  color: var(--red);
+  color: #fff;
   font-size: calc(var(--u) * 450);
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
 }
 
 .gkr-sector {
   top: calc(50% + (864 - var(--mid)) * var(--u));
   margin: 0;
-  color: var(--red);
+  color: #fff;
   font-size: calc(var(--u) * 100);
   letter-spacing: 0.05em;
 }
@@ -751,6 +698,7 @@ html:has(.gks) *::-webkit-scrollbar {
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  .gkr-title,
   .gkr-sector,
   .gkr-star,
   .gkr-cta,
@@ -758,6 +706,11 @@ html:has(.gks) *::-webkit-scrollbar {
   .gkr-mail {
     opacity: 0;
     transition: opacity 0.7s ease, transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+
+  .gkr-title {
+    transform: translateY(calc(var(--u) * 40));
+    transition-delay: 0.04s;
   }
 
   .gkr-sector {
@@ -780,7 +733,7 @@ html:has(.gks) *::-webkit-scrollbar {
     transition-delay: 0.4s;
   }
 
-  .gkr.is-in :is(.gkr-sector, .gkr-cta, .gkr-phone, .gkr-mail) {
+  .gkr.is-in :is(.gkr-title, .gkr-sector, .gkr-cta, .gkr-phone, .gkr-mail) {
     opacity: 1;
     transform: none;
   }
@@ -800,15 +753,12 @@ html:has(.gks) *::-webkit-scrollbar {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gkh-title,
+  .gkh-brand,
   .gkh-sector,
   .gkh-star,
   .gkh-fit,
   .gkh-galacticos,
-  .gkh-film,
-  .gka-film,
-  .gkr-film,
-  .gka-mark,
+  .gks-film,
   .gka-title,
   .gka-item,
   .gka-item__body {

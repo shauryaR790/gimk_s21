@@ -63,7 +63,6 @@ const HERO_CELLS = HERO_ROWS.slice(0, -1).flatMap((y, row) => {
 function Hero() {
   return (
     <section className="gkh">
-      <SilkFilm className="gkh-film" startAt={0} />
       <div className="gkh-sticky">
         <div className="gkh-fit" aria-hidden="true">
           <img className="gkh-fit__photo" src={grid} alt="" />
@@ -84,7 +83,10 @@ function Hero() {
         </div>
         <div className="gkh-galacticos" aria-hidden="true" />
         <div className="gkh-stage">
-          <p className="gkh-sector">SECTOR 19</p>
+          <div className="gkh-lockup">
+            <h1 className="gkh-brand">GYMKHANA</h1>
+            <p className="gkh-sector">SECTOR 19</p>
+          </div>
           <img className="gkh-star" src={star} alt="" />
         </div>
       </div>
@@ -101,8 +103,6 @@ function Activities() {
       id="activities"
       className={`gka${inView ? ' is-in' : ''}`}
     >
-      <SilkFilm className="gka-film" />
-      <p className="gka-mark">GYMKHANA</p>
       <h2 className="gka-title">ACTIVITIES</h2>
       <ul className="gka-list">
         {ACTIVITIES.map((name, index) => {
@@ -111,6 +111,7 @@ function Activities() {
             <li key={name} className={`gka-item${expanded ? ' is-open' : ''}`} style={{ ['--i' as string]: index }}>
               <button
                 type="button"
+                className="gka-item__name"
                 aria-expanded={expanded}
                 onClick={() => setOpen(expanded ? null : name)}
               >
@@ -133,7 +134,6 @@ function Register() {
   const [ref, inView] = useInView<HTMLElement>();
   return (
     <section ref={ref} id="register" className={`gkr${inView ? ' is-in' : ''}`}>
-      <SilkFilm className="gkr-film" variant="mirror" />
       <h2 className="gkr-title">GYMKHANA</h2>
       <p className="gkr-sector">SECTOR 19</p>
       <img className="gkr-star" src={star} alt="" />
@@ -148,7 +148,11 @@ export function SiteHome() {
   const navigate = useNavigate();
   const scrollerRef = useRef<HTMLElement>(null);
   const [menu, setMenu] = useState(false);
+  const menuRef = useRef(false);
   const signedIn = Boolean(readMemberPass());
+  useEffect(() => {
+    menuRef.current = menu;
+  }, [menu]);
   useEffect(() => {
     document.title = 'Gymkhana · Sector 19';
     document.documentElement.classList.add('gks-page');
@@ -163,33 +167,6 @@ export function SiteHome() {
     if (!root) return;
     let frame = 0;
     let heroLatched = false;
-    let regLatched = false;
-    let regDisplay = 0;
-    let regTick = 0;
-    let snapping = false;
-
-    const writeReg = (value: number) => {
-      regDisplay = value;
-      root.style.setProperty('--reg', value.toFixed(4));
-      root.classList.toggle('is-docked', heroLatched && value < 0.02);
-      root.classList.toggle('is-reg', value > 0.92);
-    };
-
-    const easeRegTo = (target: number) => {
-      if (regTick) window.cancelAnimationFrame(regTick);
-      root.classList.add('is-reg-snap');
-      const step = () => {
-        const delta = target - regDisplay;
-        if (Math.abs(delta) < 0.002) {
-          writeReg(target);
-          regTick = 0;
-          return;
-        }
-        writeReg(regDisplay + delta * 0.18);
-        regTick = window.requestAnimationFrame(step);
-      };
-      regTick = window.requestAnimationFrame(step);
-    };
 
     const update = () => {
       frame = 0;
@@ -210,45 +187,21 @@ export function SiteHome() {
       }
       const blendT = Math.min(1, Math.max(0, (y - range * 0.8) / (range * 0.2)));
       const blend = blendT * blendT * blendT * (blendT * (blendT * 6 - 15) + 10);
+
       const register = root.querySelector('.gkr');
-      const maxScroll = Math.max(1, root.scrollHeight - root.clientHeight);
-      const end = register instanceof HTMLElement
-        ? Math.min(register.offsetTop, maxScroll)
-        : maxScroll;
-      // Near the bottom: auto-slide into p3 and expand the title — no fine scroll needed.
-      const engage = end - root.clientHeight * 0.28;
-      const release = end - root.clientHeight * 0.55;
-      if (!regLatched && y >= engage) {
-        regLatched = true;
-        snapping = true;
-        easeRegTo(1);
-        root.scrollTo({ top: maxScroll, behavior: 'smooth' });
-        window.setTimeout(() => {
-          snapping = false;
-        }, 700);
-      } else if (regLatched && y < release) {
-        regLatched = false;
-        root.classList.remove('is-reg-snap');
-        easeRegTo(0);
-      }
-
-      if (!regLatched && !regTick) {
-        const lead = Math.min(Math.max(root.clientHeight * 0.35, 100), end);
-        const start = Math.max(0, end - lead);
-        let reg = 0;
-        if (y > start) {
-          const t = Math.min(1, Math.max(0, (y - start) / Math.max(1, end - start)));
-          reg = t * t * (3 - 2 * t);
-        }
-        writeReg(reg);
-      } else if (regLatched && !regTick) {
-        writeReg(1);
-      }
-
+      const onReg = register instanceof HTMLElement
+        && y >= register.offsetTop - root.clientHeight * 0.15;
+      const docked = heroLatched && !onReg;
       root.style.setProperty('--hero', next.toFixed(4));
       root.style.setProperty('--blend', blend.toFixed(4));
+      root.style.setProperty('--reg', onReg ? '1' : '0');
       root.classList.toggle('is-away', next >= 0.5);
-      if (snapping && Math.abs(y - maxScroll) < 1) snapping = false;
+      root.classList.toggle('is-docked', docked);
+      root.classList.toggle('is-reg', onReg);
+      if (menuRef.current && !docked) {
+        menuRef.current = false;
+        setMenu(false);
+      }
     };
     const onScroll = () => {
       if (!frame) frame = window.requestAnimationFrame(update);
@@ -258,11 +211,15 @@ export function SiteHome() {
     window.addEventListener('resize', onScroll);
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
-      if (regTick) window.cancelAnimationFrame(regTick);
       root.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
     };
   }, []);
+  useEffect(() => {
+    const root = scrollerRef.current;
+    if (!root) return;
+    root.classList.toggle('is-menu', menu);
+  }, [menu]);
   useEffect(() => {
     if (!menu) return;
     const onKey = (event: KeyboardEvent) => {
@@ -272,17 +229,8 @@ export function SiteHome() {
     return () => window.removeEventListener('keydown', onKey);
   }, [menu]);
   return (
-    <main className={`gks${menu ? ' is-menu' : ''}`} ref={scrollerRef}>
+    <main className="gks" ref={scrollerRef}>
       <header className="gks-bar">
-        <h1 className="gkh-title">
-          <button
-            type="button"
-            className="gkh-title__mark"
-            onClick={() => scrollerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
-          >
-            GYMKHANA
-          </button>
-        </h1>
         <button
           type="button"
           className="gkh-burger"
@@ -335,9 +283,12 @@ export function SiteHome() {
           )}
         </nav>
       </aside>
-      <Hero />
-      <Activities />
-      <Register />
+      <div className="gks-silk-track">
+        <SilkFilm className="gks-film" startAt={0} />
+        <Hero />
+        <Activities />
+        <Register />
+      </div>
     </main>
   );
 }
