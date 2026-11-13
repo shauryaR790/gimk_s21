@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { formatOdooINR, type SalesReport, type SalesTicket } from '../../../../shared/domain';
+import { pushToast } from '../../../components/Toast';
 import { api } from '../../../lib/api';
 import { downloadExcel } from '../../../lib/excel';
 import { useTitle } from '../../../lib/useTitle';
@@ -75,7 +76,6 @@ export function ReportingPage() {
   const [range, setRange] = useState<Range>('today');
   const [report, setReport] = useState<SalesReport | null>(null);
   const [previousTickets, setPreviousTickets] = useState<SalesTicket[]>([]);
-  const [error, setError] = useState('');
   const [gym, setGym] = useState<{
     facilityRevenue: number;
     membershipRevenue: number;
@@ -93,7 +93,6 @@ export function ReportingPage() {
 
   useEffect(() => {
     let live = true;
-    setError('');
     const current = rangeBounds(range);
     const previous = previousBounds(range);
     void Promise.all([
@@ -108,7 +107,7 @@ export function ReportingPage() {
         setGym(centre);
       })
       .catch((err: unknown) => {
-        if (live) setError(err instanceof Error ? err.message : 'Could not load the report');
+        if (live) pushToast(err instanceof Error ? err.message : 'Could not load the report', 'err');
       });
     return () => {
       live = false;
@@ -241,8 +240,6 @@ export function ReportingPage() {
           onChange={(value) => setRange(value as Range)}
         />
       </header>
-
-      {error ? <p className="o-track__error">{error}</p> : null}
 
       <section className="o-track__kpis o-track__kpis--four">
         <article>

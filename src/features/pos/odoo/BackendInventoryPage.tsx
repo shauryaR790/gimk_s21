@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChromeRecords } from './chrome';
 import { formatOdooINR, type InventoryItem } from '../../../../shared/domain';
+import { pushToast } from '../../../components/Toast';
 import { api } from '../../../lib/api';
 import { useTitle } from '../../../lib/useTitle';
 
@@ -14,15 +15,13 @@ export function BackendInventoryPage() {
   useTitle('Inventory');
   const navigate = useNavigate();
   const [data, setData] = useState<{ items: InventoryItem[] } | null>(null);
-  const [error, setError] = useState('');
   const [query, setQuery] = useState('');
 
   const load = useCallback(async () => {
     try {
       setData(await api<{ items: InventoryItem[] }>('/api/inventory'));
-      setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load inventory');
+      pushToast(err instanceof Error ? err.message : 'Could not load inventory', 'err');
     }
   }, []);
 
@@ -48,8 +47,6 @@ export function BackendInventoryPage() {
           <button type="button" className="gk-btn" onClick={() => navigate('/pos/backend/inventory/new')}>Add item</button>
         </div>
       </header>
-
-      {error ? <p className="o-track__error">{error}</p> : null}
 
       <section className="o-track__status">
         <article className="o-track__stat o-track__stat--plain"><span>Pieces tracked</span><strong>{items.reduce((sum, item) => sum + item.qty, 0)}</strong><em>In the store</em></article>

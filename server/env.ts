@@ -33,6 +33,8 @@ export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT || 8787),
   sessionSecret: process.env.SESSION_SECRET || 'dev-only-change-me',
+  /** When true, seed demo members/bookings/shifts. Leave off for production handovers. */
+  seedDemo: process.env.SEED_DEMO === 'true',
   otpProvider: process.env.OTP_PROVIDER || (process.env.FAST2SMS_API_KEY ? 'fast2sms' : 'mock'),
   fast2smsApiKey: process.env.FAST2SMS_API_KEY || '',
   otpDevExpose: process.env.OTP_DEV_EXPOSE === 'true',
@@ -54,6 +56,10 @@ export const env = {
 
 export function isProduction() {
   return env.nodeEnv === 'production';
+}
+
+export function wantDemoSeed() {
+  return env.seedDemo;
 }
 
 /** When true, checkout responses may include devCode and the UI shows “Tap to fill”. */

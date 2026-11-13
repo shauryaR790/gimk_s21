@@ -151,11 +151,10 @@ export function stashSelectedMembers(ids: string[]) {
   sessionStorage.setItem(SELECTED_KEY, JSON.stringify(ids));
 }
 
-function Shell({ title, children, error }: { title: string; children: ReactNode; error?: string }) {
+function Shell({ title, children }: { title: string; children: ReactNode; error?: string }) {
   useTitle(title);
   return (
     <section className="o-track">
-      {error ? <p className="o-track__error">{error}</p> : null}
       {children}
     </section>
   );
@@ -189,7 +188,9 @@ function OverviewView() {
       setData(await api<Overview>(`/api/gym/communications/overview?${query.toString()}`));
       setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load communications.');
+      const message = err instanceof Error ? err.message : 'Could not load communications.';
+      setError(message);
+      pushToast(message, 'err');
     }
   }, [from, to]);
   useEffect(() => { void load(); }, [load]);
@@ -323,7 +324,9 @@ function ComposeView() {
       setPreview(data);
       setConfirming(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not preview.');
+      const message = err instanceof Error ? err.message : 'Could not preview.';
+      setError(message);
+      pushToast(message, 'err');
     } finally {
       setBusy(false);
     }
@@ -458,7 +461,9 @@ function AudienceView() {
       setMembers(data.members);
       setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load members.');
+      const message = err instanceof Error ? err.message : 'Could not load members.';
+      setError(message);
+      pushToast(message, 'err');
     }
   }, [filter, sport, from, to]);
   useEffect(() => { void load(); }, [load]);
@@ -626,7 +631,9 @@ function TemplatesView() {
       setRows(data.templates);
       setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load templates.');
+      const message = err instanceof Error ? err.message : 'Could not load templates.';
+      setError(message);
+      pushToast(message, 'err');
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -749,7 +756,9 @@ function ReportView({ id }: { id: string }) {
       setData(await api(`/api/gym/communications/campaigns/${id}`));
       setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load report.');
+      const message = err instanceof Error ? err.message : 'Could not load report.';
+      setError(message);
+      pushToast(message, 'err');
     }
   }, [id]);
   useEffect(() => { void load(); }, [load]);

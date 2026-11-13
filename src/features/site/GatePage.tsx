@@ -97,7 +97,7 @@ export function GatePage() {
           setState({ kind: 'auth', sport: sport || '', door });
           return;
         }
-        setState({ kind: 'error', message: err instanceof Error ? err.message : 'Could not check you in.' });
+        setState({ kind: 'error', message: 'Could not check you in. Try again or register on this phone.' });
       }
     })();
     return () => {

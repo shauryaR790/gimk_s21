@@ -100,7 +100,9 @@ function useLoad<T>(path: string) {
       setData(await api<T>(path));
       setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load this page.');
+      const message = err instanceof Error ? err.message : 'Could not load this page.';
+      setError(message);
+      pushToast(message, 'err');
     }
   }, [path]);
   useEffect(() => {
@@ -109,11 +111,10 @@ function useLoad<T>(path: string) {
   return { data, error, reload };
 }
 
-function Shell({ title, children, error }: { title: string; children: ReactNode; error?: string }) {
+function Shell({ title, children }: { title: string; children: ReactNode; error?: string }) {
   useTitle(title);
   return (
     <section className="o-track">
-      {error ? <p className="o-track__error">{error}</p> : null}
       {children}
     </section>
   );
@@ -1432,7 +1433,6 @@ function JoinRequestsList({
   const columns = route === 'TRAINER' ? 6 : 8;
   const body = (
     <>
-      {embedded && error ? <p className="o-track__error">{error}</p> : null}
       <section className="o-track__status">
         {route === 'TRAINER' ? (
           <>

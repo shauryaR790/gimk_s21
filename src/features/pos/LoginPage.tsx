@@ -135,7 +135,7 @@ export function LoginPage() {
         openDesk(user.role);
         return;
       }
-      setError('Wrong PIN. Use 2580 for the demo register.');
+      setError('Wrong PIN.');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Sign-in failed.');
     } finally {
@@ -223,7 +223,6 @@ export function LoginPage() {
             <h1>Sign in</h1>
           </div>
         </div>
-        <p className="o-login__hint">Demo PIN</p>
         <label className="o-login__field">
           <span>PIN</span>
           <input

@@ -2,7 +2,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Express, NextFunction, Request, Response } from 'express';
 import { AppError } from './appError';
 import { hashPassword, verifyPassword } from './auth';
-import { env, exposeDevOtp, isProduction, razorpayEnabled } from './env';
+import { env, exposeDevOtp, isProduction, razorpayEnabled, wantDemoSeed } from './env';
 import { CAFE_ID } from './ids';
 import { all, get, run, tx } from './db';
 import { createStaffOrder, loadCatalog, markPaid, retimeOrder } from './logic';
@@ -2770,6 +2770,12 @@ export function seedGymkhana() {
     `INSERT OR IGNORE INTO announcements (id, cafe_id, title, body, created_at) VALUES ('ann_open', ?, 'Courts open at 6', 'Book a slot from the member home or the reception desk.', ?)`,
     [CAFE_ID, nowIso()],
   );
+  if (!wantDemoSeed()) {
+    seedOnce('handover_clean_v1', () => {
+      clearOperationalData();
+    });
+    return;
+  }
   const demo = get<{ id: string }>('SELECT id FROM customers WHERE cafe_id = ? AND mobile = ?', [CAFE_ID, '9811111111']);
   if (!demo) {
     const id = 'member_demo';
@@ -2998,7 +3004,55 @@ export function seedGymkhana() {
   repairMemberAccess();
 }
 
+/** Wipe live POS / member activity. Keeps catalog: staff, facilities, plans, trainers, menu. */
+export function clearOperationalData() {
+  const tables = [
+    'whatsapp_recipients',
+    'whatsapp_messages',
+    'whatsapp_campaigns',
+    'whatsapp_webhook_events',
+    'notification_queue',
+    'notification_events',
+    'communication_consent',
+    'order_item_addons',
+    'order_items',
+    'payments',
+    'order_events',
+    'orders',
+    'booking_participants',
+    'bookings',
+    'check_ins',
+    'class_registrations',
+    'equipment_rentals',
+    'memberships',
+    'join_requests',
+    'trainer_sessions',
+    'desk_shifts',
+    'employee_attendance',
+    'maintenance_records',
+    'notifications',
+    'reservations',
+    'otp_challenges',
+    'pos_cash_moves',
+    'pos_sessions',
+    'audit_logs',
+  ];
+  for (const table of tables) {
+    try {
+      run(`DELETE FROM ${table}`);
+    } catch {
+      /* older DBs may miss a table */
+    }
+  }
+  run(`DELETE FROM customers WHERE cafe_id = ?`, [CAFE_ID]);
+  run(`DELETE FROM announcements WHERE cafe_id = ? AND id != 'ann_open'`, [CAFE_ID]);
+  run(`DELETE FROM seed_marks WHERE id LIKE 'demo_%'`);
+  run(`UPDATE order_counters SET next_number = 101 WHERE cafe_id = ?`, [CAFE_ID]);
+  return { ok: true, cleared: true };
+}
+
 function repairMemberAccess() {
+  if (!wantDemoSeed()) return;
   const planIds = ['plan_monthly', 'plan_quarterly', 'plan_annual', 'plan_student', 'plan_family', 'plan_premium'] as const;
   const pendingDemo = all<{ id: string }>(
     `SELECT id FROM customers WHERE cafe_id = ? AND id LIKE 'demo_mem_%' AND (membership_status = 'PENDING' OR IFNULL(plan_id, '') = '')`,
@@ -3150,6 +3204,9 @@ export function registerGymRoutes(
   };
   const actor = (req: Request): Actor => ({ id: req.user?.id ?? '', name: req.user?.name ?? 'Staff', role: req.user?.role ?? '' });
 
+  app.post('/api/gym/ops/reset', allowAdmin(), wrap((_req, res) => {
+    res.json(clearOperationalData());
+  }));
   app.get('/api/gym/overview', allow('RECEPTIONIST', 'CASHIER', 'COACH', 'FACILITY_MANAGER', 'INVENTORY_MANAGER'), wrap((_req, res) => {
     res.json(overview());
   }));

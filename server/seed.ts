@@ -258,7 +258,7 @@ export async function seed() {
     ensureTables(now);
     ensureDrinkAddonGroups();
     ensureMenuDisplayMeta();
-    ensureDemoScenarios();
+    if (env.seedDemo) ensureDemoScenarios();
     ensureInventorySeed();
     ensureBasicIngredients();
     purgeBlockedCustomers();
@@ -291,57 +291,55 @@ export async function seed() {
 
   ensureTables(now);
 
-  const ago = (minutes: number) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
-
-  const completed = createStaffOrder({
-    tableCode: 'T01',
-    customerName: 'Meera',
-    customerMobile: '9876500101',
-    items: [
-      { menuItemId: 'item_espresso', quantity: 2, addonIds: [] },
-      { menuItemId: 'item_club_sandwich', quantity: 1, addonIds: [] },
-    ],
-  });
-  for (const status of ['READY', 'SERVED', 'COMPLETED'] as const) transitionOrder(completed.id, status);
-  markPaid(completed.id, 'CASH');
-  retimeOrder(completed.id, ago(120));
-
-  const ready = createStaffOrder({
-    tableCode: 'T02',
-    customerName: 'Rohan',
-    customerMobile: '9876500102',
-    items: [
-      { menuItemId: 'item_green_tea', quantity: 1, addonIds: [] },
-      { menuItemId: 'item_cheese_burger', quantity: 1, addonIds: [] },
-    ],
-  });
-  transitionOrder(ready.id, 'READY');
-  retimeOrder(ready.id, ago(35));
-
-  const preparing = createStaffOrder({
-    tableCode: 'T03',
-    customerName: 'Priya',
-    customerMobile: '9876500103',
-    items: [
-      { menuItemId: 'item_milkshake_banana', quantity: 1, addonIds: [] },
-      { menuItemId: 'item_pasta_bolo', quantity: 1, addonIds: [] },
-    ],
-  });
-  retimeOrder(preparing.id, ago(18));
-
-  const fresh = createStaffOrder({
-    tableCode: 'T05',
-    customerName: 'Arjun',
-    customerMobile: '9876500104',
-    items: [
-      { menuItemId: 'item_espresso', quantity: 1, addonIds: [] },
-      { menuItemId: 'item_bacon_burger', quantity: 1, addonIds: [] },
-    ],
-  });
-  retimeOrder(fresh.id, ago(6));
+  if (env.seedDemo) {
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
+    const completed = createStaffOrder({
+      tableCode: 'T01',
+      customerName: 'Meera',
+      customerMobile: '9876500101',
+      items: [
+        { menuItemId: 'item_espresso', quantity: 2, addonIds: [] },
+        { menuItemId: 'item_club_sandwich', quantity: 1, addonIds: [] },
+      ],
+    });
+    for (const status of ['READY', 'SERVED', 'COMPLETED'] as const) transitionOrder(completed.id, status);
+    markPaid(completed.id, 'CASH');
+    retimeOrder(completed.id, ago(120));
+    const ready = createStaffOrder({
+      tableCode: 'T02',
+      customerName: 'Rohan',
+      customerMobile: '9876500102',
+      items: [
+        { menuItemId: 'item_green_tea', quantity: 1, addonIds: [] },
+        { menuItemId: 'item_cheese_burger', quantity: 1, addonIds: [] },
+      ],
+    });
+    transitionOrder(ready.id, 'READY');
+    retimeOrder(ready.id, ago(35));
+    const preparing = createStaffOrder({
+      tableCode: 'T03',
+      customerName: 'Priya',
+      customerMobile: '9876500103',
+      items: [
+        { menuItemId: 'item_milkshake_banana', quantity: 1, addonIds: [] },
+        { menuItemId: 'item_pasta_bolo', quantity: 1, addonIds: [] },
+      ],
+    });
+    retimeOrder(preparing.id, ago(18));
+    const fresh = createStaffOrder({
+      tableCode: 'T05',
+      customerName: 'Arjun',
+      customerMobile: '9876500104',
+      items: [
+        { menuItemId: 'item_espresso', quantity: 1, addonIds: [] },
+        { menuItemId: 'item_bacon_burger', quantity: 1, addonIds: [] },
+      ],
+    });
+    retimeOrder(fresh.id, ago(6));
+    ensureDemoScenarios();
+  }
   ensureDrinkAddonGroups();
   ensureMenuDisplayMeta();
-  ensureDemoScenarios();
   ensureInventorySeed();
   ensureBasicIngredients();
   purgeBlockedCustomers();
