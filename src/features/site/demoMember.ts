@@ -84,7 +84,7 @@ export function makeDemoMember(sport: string) {
     ctx.fillText('NOT A GOVERNMENT DOCUMENT', 220, 304);
     ctx.fillStyle = '#888';
     ctx.font = '500 13px Georgia, serif';
-    ctx.fillText('Gymkhana desk demo · Sector 19', 48, 384);
+    ctx.fillText('Gymkhana desk demo · Sector 21', 48, 384);
   });
   return {
     name,

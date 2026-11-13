@@ -49,7 +49,7 @@ export function MemberReport() {
 
   return (
     <section className="gkm-sheet">
-      <p className="gkm-brand">GYMKHANA<br /><span>SECTOR 19</span></p>
+      <p className="gkm-brand">GYMKHANA<br /><span>SECTOR 21</span></p>
       <form className="gkm-form" onSubmit={(event) => void send(event)}>
         <div className="gkm-sheet__card">
           <h1>REPORT</h1>

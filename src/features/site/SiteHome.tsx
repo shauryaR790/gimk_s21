@@ -85,7 +85,7 @@ function Hero() {
         <div className="gkh-stage">
           <div className="gkh-lockup">
             <h1 className="gkh-brand">GYMKHANA</h1>
-            <p className="gkh-sector">SECTOR 19</p>
+            <p className="gkh-sector">SECTOR 21</p>
           </div>
           <img className="gkh-star" src={star} alt="" />
         </div>
@@ -135,7 +135,7 @@ function Register() {
   return (
     <section ref={ref} id="register" className={`gkr${inView ? ' is-in' : ''}`}>
       <h2 className="gkr-title">GYMKHANA</h2>
-      <p className="gkr-sector">SECTOR 19</p>
+      <p className="gkr-sector">SECTOR 21</p>
       <img className="gkr-star" src={star} alt="" />
       <Link className="gkr-cta" to="/register">REGISTER<br />NOW</Link>
       <a className="gkr-phone" href="tel:+911010100001">+91 10101 00001</a>
@@ -154,7 +154,7 @@ export function SiteHome() {
     menuRef.current = menu;
   }, [menu]);
   useEffect(() => {
-    document.title = 'Gymkhana · Sector 19';
+    document.title = 'Gymkhana · Sector 21';
     document.documentElement.classList.add('gks-page');
     document.body.classList.add('gks-page');
     return () => {

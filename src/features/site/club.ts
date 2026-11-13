@@ -67,7 +67,7 @@ function festivalLine(now = new Date()) {
   if (stamp >= 101 && stamp <= 104) return 'Happy New Year from Gymkhana. Book a morning slot while the year is still quiet.';
   if (stamp >= 124 && stamp <= 128) return 'Republic Day week. The grounds stay open. Come play.';
   if (stamp >= 308 && stamp <= 318) return 'Holi week. Drink water, then take the court.';
-  if (stamp >= 810 && stamp <= 817) return 'Independence Day week at Sector 19.';
+  if (stamp >= 810 && stamp <= 817) return 'Independence Day week at Sector 21.';
   if (stamp >= 1018 && stamp <= 1102) return 'Diwali glow on the silk. Play, then go home to the lamps.';
   if (stamp >= 1115 && stamp <= 1126) return 'Guru Nanak Jayanti. A calm court is still a court.';
   if (stamp >= 1220 && stamp <= 1228) return 'Christmas week at Gymkhana. Early slots go first.';

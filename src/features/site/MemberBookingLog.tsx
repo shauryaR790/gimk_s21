@@ -20,7 +20,7 @@ export function MemberBookingLog() {
 
   return (
     <section className="gkm-sheet">
-      <p className="gkm-brand">GYMKHANA<br /><span>SECTOR 19</span></p>
+      <p className="gkm-brand">GYMKHANA<br /><span>SECTOR 21</span></p>
       <div className="gkm-sheet__card">
         <h1>MY BOOKINGS</h1>
         {sessions.length ? (

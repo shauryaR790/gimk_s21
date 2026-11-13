@@ -19,7 +19,7 @@ export function DoneScreen({
     <section className="gk-done" aria-live="polite">
       <header className="gk-done__head">
         <Link to="/" className="gk-done__mark">GYMKHANA</Link>
-        <p className="gk-done__sector">SECTOR 19</p>
+        <p className="gk-done__sector">SECTOR 21</p>
       </header>
       <img className="gk-done__star" src={star} alt="" />
       <p className="gk-done__copy">{copy}</p>
